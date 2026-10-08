@@ -1,0 +1,126 @@
+<main class="auth-shell">
+  <a class="brand" routerLink="/auth/login" aria-label="Commonroom home">
+    <span class="brand-mark" aria-hidden="true">c</span>
+    <span>commonroom</span>
+  </a>
+
+  <section class="auth-card" aria-labelledby="register-title">
+    @if (registrationComplete()) {
+      <div class="completion" role="status">
+        <span class="completion-mark" aria-hidden="true">&#10003;</span>
+        <p class="eyebrow">ACCOUNT CREATED</p>
+        <h1 id="register-title">You’re all set.</h1>
+        <p class="intro">Your Commonroom account is ready. Sign in to continue.</p>
+        <a class="submit-button continue-link" routerLink="/auth/login" [queryParams]="{ registered: true }">
+          <span>Go to sign in</span><span aria-hidden="true">&#8594;</span>
+        </a>
+      </div>
+    } @else {
+      <div class="card-heading">
+        <p class="eyebrow">MAKE YOURSELF AT HOME</p>
+        <h1 id="register-title">Create an account</h1>
+        <p class="intro">A good conversation starts with a hello.</p>
+      </div>
+
+      @if (serverError()) {
+        <p class="notice error" role="alert">{{ serverError() }}</p>
+      }
+
+      <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" type="text" formControlName="username" autocomplete="username" />
+          @if (form.controls.username.touched && form.controls.username.errors; as errors) {
+            @if (errors['required']) {
+              <span class="field-error">Choose a username.</span>
+            } @else if (errors['minlength']) {
+              <span class="field-error">Use at least 3 characters.</span>
+            } @else if (errors['maxlength']) {
+              <span class="field-error">Use no more than 32 characters.</span>
+            }
+          }
+        </div>
+
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" type="email" formControlName="email" autocomplete="email" />
+          @if (form.controls.email.touched && form.controls.email.errors; as errors) {
+            @if (errors['required']) {
+              <span class="field-error">Enter your email address.</span>
+            } @else if (errors['email']) {
+              <span class="field-error">Enter a valid email address.</span>
+            } @else if (errors['maxlength']) {
+              <span class="field-error">Email must be 256 characters or fewer.</span>
+            }
+          }
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <div class="password-wrap">
+            <input
+              id="password"
+              [type]="passwordVisible() ? 'text' : 'password'"
+              formControlName="password"
+              autocomplete="new-password"
+            />
+            <button
+              class="visibility-toggle"
+              type="button"
+              [attr.aria-label]="passwordVisible() ? 'Hide password' : 'Show password'"
+              [attr.aria-pressed]="passwordVisible()"
+              (click)="passwordVisible.update((visible) => !visible)"
+            >{{ passwordVisible() ? 'Hide' : 'Show' }}</button>
+          </div>
+          @if (form.controls.password.touched && form.controls.password.errors; as errors) {
+            @if (errors['required']) {
+              <span class="field-error">Create a password.</span>
+            } @else if (errors['minlength']) {
+              <span class="field-error">Use at least 8 characters.</span>
+            } @else if (errors['maxlength']) {
+              <span class="field-error">Use no more than 100 characters.</span>
+            }
+          }
+        </div>
+
+        <div class="field">
+          <label for="confirm-password">Confirm password</label>
+          <div class="password-wrap">
+            <input
+              id="confirm-password"
+              [type]="confirmationVisible() ? 'text' : 'password'"
+              formControlName="confirmPassword"
+              autocomplete="new-password"
+            />
+            <button
+              class="visibility-toggle"
+              type="button"
+              [attr.aria-label]="confirmationVisible() ? 'Hide confirmation password' : 'Show confirmation password'"
+              [attr.aria-pressed]="confirmationVisible()"
+              (click)="confirmationVisible.update((visible) => !visible)"
+            >{{ confirmationVisible() ? 'Hide' : 'Show' }}</button>
+          </div>
+          @if (form.controls.confirmPassword.touched && form.controls.confirmPassword.hasError('required')) {
+            <span class="field-error">Confirm your password.</span>
+          } @else if (form.controls.confirmPassword.touched && form.hasError('passwordMismatch')) {
+            <span class="field-error">Passwords do not match.</span>
+          }
+        </div>
+
+        <button class="submit-button" type="submit" [disabled]="form.invalid || isSubmitting()">
+          @if (isSubmitting()) {
+            <span class="spinner" aria-hidden="true"></span>
+            <span>Creating account</span>
+          } @else {
+            <span>Create account</span>
+            <span aria-hidden="true">&#8594;</span>
+          }
+        </button>
+      </form>
+
+      <p class="switch-prompt">Already have an account? <a routerLink="/auth/login">Sign in</a></p>
+    }
+  </section>
+
+  <p class="page-note">A little more room for good conversation.</p>
+</main>
