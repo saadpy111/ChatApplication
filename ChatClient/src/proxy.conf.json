@@ -1,0 +1,13 @@
+{
+  "/api": {
+    "target": "http://localhost:5083",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/chatHub": {
+    "target": "http://localhost:5083",
+    "secure": false,
+    "ws": true,
+    "changeOrigin": true
+  }
+}

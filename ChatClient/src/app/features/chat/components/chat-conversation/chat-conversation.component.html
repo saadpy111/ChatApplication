@@ -1,0 +1,87 @@
+<main class="conversation">
+  <header class="conversation-header">
+    <div class="room-heading">
+      @if (friend(); as selected) {
+        <div class="eyebrow">DIRECT CONVERSATION</div>
+        <h1>{{ selected.username }}</h1>
+        <p>Conversation with {{ selected.username }}</p>
+      } @else {
+        <div class="eyebrow">YOUR MESSAGES</div>
+        <h1>Find a friend</h1>
+        <p>Search for someone to open a conversation.</p>
+      }
+    </div>
+    <div class="connection-area">
+      <div class="connection-state" [class.connected]="connectionStatus() === 'connected'" [class.reconnecting]="connectionStatus() === 'reconnecting'">
+        <span class="connection-dot" aria-hidden="true"></span>
+        @switch (connectionStatus()) {
+          @case ('connected') { <span>Connected</span> }
+          @case ('connecting') { <span>Connecting</span> }
+          @case ('reconnecting') { <span>Reconnecting</span> }
+          @default { <span>Offline</span> }
+        }
+      </div>
+      @if (connectionStatus() === 'disconnected') {
+        <button class="retry-button" type="button" (click)="retryConnection.emit()">Retry</button>
+      }
+    </div>
+  </header>
+
+  <section class="message-list" aria-label="Conversation" aria-live="polite" aria-relevant="additions">
+    @if (!friend()) {
+      <div class="empty-state">
+        <div class="eyebrow">A GOOD PLACE TO BEGIN</div>
+        <h2>Find someone<br />to talk to.</h2>
+        <p>Search for a username in the sidebar to open a conversation.</p>
+      </div>
+    } @else if (messages().length === 0) {
+      <div class="empty-state">
+        <div class="eyebrow">PRIVATE CHAT</div>
+        <h2>Say hello.</h2>
+        <p>Your messages with {{ friend()?.username }} will appear here.</p>
+      </div>
+    } @else {
+      <div class="message-list-inner">
+        @for (message of messages(); track message.id) {
+          <article class="message" [class.own-message]="message.sender === 'me'">
+            <div class="message-avatar" aria-hidden="true">{{ message.sender === 'me' ? 'Y' : (friend()?.username?.charAt(0)?.toUpperCase() || '?') }}</div>
+            <div class="message-body">
+              <div class="message-meta">
+                <span class="message-author">{{ message.sender === 'me' ? 'You' : friend()?.username }}</span>
+                <time>{{ message.sentAt | date:'shortTime' }}</time>
+              </div>
+              <p>{{ message.text }}</p>
+            </div>
+          </article>
+        }
+      </div>
+    }
+  </section>
+
+  @if (friend()) {
+    <footer class="composer-wrap">
+      @if (connectionError()) {
+        <div class="connection-error" role="status">{{ connectionError() }}</div>
+      }
+      <form class="composer" (ngSubmit)="send()">
+        <textarea
+          [(ngModel)]="draft"
+          name="message"
+          rows="1"
+          maxlength="2000"
+          placeholder="Write a message..."
+          aria-label="Message"
+          [disabled]="connectionStatus() !== 'connected' || sending()"
+          (keydown.enter)="handleEnter($event)"
+        ></textarea>
+        <div class="composer-footer">
+          <span class="composer-hint">Enter to send <span aria-hidden="true">·</span> Shift + Enter for a new line</span>
+          <button class="send-button" type="submit" [disabled]="!draft.trim() || connectionStatus() !== 'connected' || sending()" aria-label="Send message">
+            <span>{{ sending() ? 'Sending' : 'Send' }}</span>
+            <span class="send-arrow" aria-hidden="true">↗</span>
+          </button>
+        </div>
+      </form>
+    </footer>
+  }
+</main>

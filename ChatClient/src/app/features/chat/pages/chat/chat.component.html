@@ -1,0 +1,15 @@
+<div class="chat-shell">
+  <app-chat-sidebar
+    [selectedFriend]="selectedFriend()"
+    (friendSelected)="openConversation($event)"
+  />
+  <app-chat-conversation
+    [friend]="selectedFriend()"
+    [messages]="messages()"
+    [connectionStatus]="chatService.status()"
+    [connectionError]="chatService.error()"
+    [sending]="sending()"
+    (messageSubmitted)="sendMessage($event)"
+    (retryConnection)="connect()"
+  />
+</div>
