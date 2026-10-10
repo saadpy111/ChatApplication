@@ -1,59 +1,79 @@
-import { DatePipe } from '@angular/common';
 import { Component, DestroyRef, inject, OnInit, signal } from '@angular/core';
-import { FormsModule } from '@angular/forms';
-import { catchError, debounceTime, distinctUntilChanged, finalize, of, Subject, switchMap } from 'rxjs';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { UsersApiService } from '../../../users/data-access/users-api.service';
+import { ChatMessage } from '../../models/chat-message.model';
+import { ChatConversationComponent } from '../../components/chat-conversation/chat-conversation.component';
+import { ChatSidebarComponent } from '../../components/chat-sidebar/chat-sidebar.component';
 import { User } from '../../../users/models/user';
+import { ChatService } from '../../services/chatService';
 
 @Component({
   selector: 'app-chat',
-  imports: [FormsModule],
+  imports: [ChatSidebarComponent, ChatConversationComponent],
   templateUrl: './chat.component.html',
   styleUrl: './chat.component.css',
 })
 export class ChatComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
-  private readonly usersApi = inject(UsersApiService);
-  private readonly searchTerms = new Subject<string>();
-
-  searchQuery = '';
-  readonly friends = signal<User[]>([]);
+  readonly chatService = inject(ChatService);
   readonly selectedFriend = signal<User | null>(null);
-  readonly searching = signal(false);
-  readonly searchError = signal<string | null>(null);
+  readonly messages = signal<ChatMessage[]>([]);
+  readonly sending = signal(false);
 
   ngOnInit(): void {
-    this.searchTerms.pipe(
-      debounceTime(250),
-      distinctUntilChanged(),
-      switchMap((query) => {
-        const username = query.trim();
-        this.searchError.set(null);
+    const unsubscribe = this.chatService.onReceiveMessage((text) => {
+      if (!this.selectedFriend()) {
+        return;
+      }
 
-        if (!username) {
-          this.searching.set(false);
-          return of([] as User[]);
-        }
+      this.messages.update((messages) => [
+        ...messages,
+        { id: this.nextMessageId++, text, sender: 'friend', sentAt: new Date() },
+      ]);
+    });
+    this.destroyRef.onDestroy(unsubscribe);
 
-        this.searching.set(true);
-        return this.usersApi.searchUsers(username).pipe(
-          catchError(() => {
-            this.searchError.set('Could not search users. Try again.');
-            return of([] as User[]);
-          }),
-          finalize(() => this.searching.set(false)),
-        );
-      }),
-      takeUntilDestroyed(this.destroyRef),
-    ).subscribe((friends) => this.friends.set(friends));
+    void this.connect();
   }
 
-  searchFriends(query: string): void {
-    this.searchTerms.next(query);
+  private nextMessageId = 0;
+
+  async connect(): Promise<void> {
+    try {
+      await this.chatService.startConnection();
+    } catch {
+      // Connection state and the error message are exposed by the chat service.
+    }
   }
 
   openConversation(friend: User): void {
+    if (this.selectedFriend()?.userId !== friend.userId) {
+      this.messages.set([]);
+    }
     this.selectedFriend.set(friend);
+  }
+
+  async sendMessage(text: string): Promise<void> {
+    const friend = this.selectedFriend();
+    if (!friend || this.sending() || this.chatService.status() !== 'connected') {
+      return;
+    }
+
+    this.sending.set(true);
+    this.chatService.error.set(null);
+
+    try {
+      await this.chatService.sendMessage(friend.userId, text);
+      if (this.selectedFriend()?.userId !== friend.userId) {
+        return;
+      }
+
+      this.messages.update((messages) => [
+        ...messages,
+        { id: this.nextMessageId++, text, sender: 'me', sentAt: new Date() },
+      ]);
+    } catch {
+      this.chatService.error.set('Your message could not be sent. Try again.');
+    } finally {
+      this.sending.set(false);
+    }
   }
 }

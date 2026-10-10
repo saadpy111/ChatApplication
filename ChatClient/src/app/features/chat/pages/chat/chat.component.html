@@ -1,78 +1,15 @@
 <div class="chat-shell">
-  <aside class="sidebar" aria-label="Chat navigation">
-    <a class="brand" href="/" aria-label="Commonroom home">
-      <span class="brand-mark" aria-hidden="true">c</span>
-      <span class="brand-name">commonroom</span>
-    </a>
-
-    <div class="sidebar-section">
-      <div class="section-label">YOUR SPACE</div>
-      <h3>Search Friends</h3>
-      <input
-        class="search-input"
-        [(ngModel)]="searchQuery"
-        (ngModelChange)="searchFriends($event)"
-        type="search"
-        placeholder="Find a username"
-        aria-label="Search friends"
-        autocomplete="off"
-      />
-
-      <div class="friend-results" aria-live="polite">
-        @if (searching()) {
-          <p class="search-state">Searching...</p>
-        } @else if (searchError()) {
-          <p class="search-state search-error" role="alert">{{ searchError() }}</p>
-        } @else if (searchQuery.trim() && friends().length === 0) {
-          <p class="search-state">No users found.</p>
-        }
-
-        @for (friend of friends(); track friend.userId) {
-          <button
-            class="friend-row"
-            [class.selected]="selectedFriend()?.userId === friend.userId"
-            type="button"
-            (click)="openConversation(friend)"
-          >
-            <span class="friend-avatar" aria-hidden="true">{{ friend.username.charAt(0).toUpperCase() || '?' }}</span>
-            <span class="friend-name">{{ friend.username }}</span>
-          </button>
-        }
-      </div>
-    </div>
-  </aside>
-
-  <main class="conversation">
-    <header class="conversation-header">
-      <div class="room-heading">
-        @if (selectedFriend(); as friend) {
-          <div class="eyebrow">DIRECT CONVERSATION</div>
-          <h1>{{ friend.username }}</h1>
-          <p>Conversation with {{ friend.username }}</p>
-        } @else {
-          <div class="eyebrow">YOUR MESSAGES</div>
-          <h1>Find a friend</h1>
-          <p>Search for someone to open a conversation.</p>
-        }
-      </div>
-    </header>
-
-    <section class="message-list" aria-label="Conversation">
-      @if (selectedFriend()) {
-        <div class="empty-state">
-          <div class="empty-mark" aria-hidden="true"><span></span><span></span><span></span></div>
-          <div class="eyebrow">PRIVATE CHAT</div>
-          <h2>Conversation selected.</h2>
-          <p>Private messaging is not available from the current chat service.</p>
-        </div>
-      } @else {
-        <div class="empty-state">
-          <div class="empty-mark" aria-hidden="true"><span></span><span></span><span></span></div>
-          <div class="eyebrow">A GOOD PLACE TO BEGIN</div>
-          <h2>Find someone<br />to talk to.</h2>
-          <p>Search for a username in the sidebar to open a conversation.</p>
-        </div>
-      }
-    </section>
-  </main>
+  <app-chat-sidebar
+    [selectedFriend]="selectedFriend()"
+    (friendSelected)="openConversation($event)"
+  />
+  <app-chat-conversation
+    [friend]="selectedFriend()"
+    [messages]="messages()"
+    [connectionStatus]="chatService.status()"
+    [connectionError]="chatService.error()"
+    [sending]="sending()"
+    (messageSubmitted)="sendMessage($event)"
+    (retryConnection)="connect()"
+  />
 </div>
