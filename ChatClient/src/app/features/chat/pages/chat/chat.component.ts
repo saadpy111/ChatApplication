@@ -1,49 +1,59 @@
 import { DatePipe } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { Component, DestroyRef, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ChatService } from '../../services/chat.service';
+import { catchError, debounceTime, distinctUntilChanged, finalize, of, Subject, switchMap } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { UsersApiService } from '../../../users/data-access/users-api.service';
+import { User } from '../../../users/models/user';
 
 @Component({
   selector: 'app-chat',
-  imports: [DatePipe, FormsModule],
+  imports: [FormsModule],
   templateUrl: './chat.component.html',
   styleUrl: './chat.component.css',
 })
 export class ChatComponent implements OnInit {
-  displayName = 'Guest';
-  draft = '';
-  sending = false;
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly usersApi = inject(UsersApiService);
+  private readonly searchTerms = new Subject<string>();
 
-  constructor(readonly chat: ChatService) {}
+  searchQuery = '';
+  readonly friends = signal<User[]>([]);
+  readonly selectedFriend = signal<User | null>(null);
+  readonly searching = signal(false);
+  readonly searchError = signal<string | null>(null);
 
   ngOnInit(): void {
-    void this.chat.connect();
+    this.searchTerms.pipe(
+      debounceTime(250),
+      distinctUntilChanged(),
+      switchMap((query) => {
+        const username = query.trim();
+        this.searchError.set(null);
+
+        if (!username) {
+          this.searching.set(false);
+          return of([] as User[]);
+        }
+
+        this.searching.set(true);
+        return this.usersApi.searchUsers(username).pipe(
+          catchError(() => {
+            this.searchError.set('Could not search users. Try again.');
+            return of([] as User[]);
+          }),
+          finalize(() => this.searching.set(false)),
+        );
+      }),
+      takeUntilDestroyed(this.destroyRef),
+    ).subscribe((friends) => this.friends.set(friends));
   }
 
-  async send(): Promise<void> {
-    const message = this.draft.trim();
-    const user = this.displayName.trim();
-
-    if (!message || !user || this.sending || this.chat.status() !== 'connected') {
-      return;
-    }
-
-    this.sending = true;
-    try {
-      await this.chat.sendMessage(user, message);
-      this.draft = '';
-    } catch {
-      this.chat.error.set('Your message could not be sent. Check the connection and try again.');
-    } finally {
-      this.sending = false;
-    }
+  searchFriends(query: string): void {
+    this.searchTerms.next(query);
   }
 
-  handleEnter(event: Event): void {
-    const keyboardEvent = event as KeyboardEvent;
-    if (!keyboardEvent.shiftKey) {
-      keyboardEvent.preventDefault();
-      void this.send();
-    }
+  openConversation(friend: User): void {
+    this.selectedFriend.set(friend);
   }
 }

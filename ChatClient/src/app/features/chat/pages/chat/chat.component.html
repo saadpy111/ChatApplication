@@ -7,101 +7,72 @@
 
     <div class="sidebar-section">
       <div class="section-label">YOUR SPACE</div>
-      <div class="room-row" aria-current="page">
-        <span class="room-hash">#</span>
-        <span>lobby</span>
-        <span class="room-indicator" aria-hidden="true"></span>
-      </div>
-    </div>
+      <h3>Search Friends</h3>
+      <input
+        class="search-input"
+        [(ngModel)]="searchQuery"
+        (ngModelChange)="searchFriends($event)"
+        type="search"
+        placeholder="Find a username"
+        aria-label="Search friends"
+        autocomplete="off"
+      />
 
-    <div class="sidebar-bottom">
-      <div class="sidebar-note">
-        <span class="note-line" aria-hidden="true"></span>
-        <p>A small place for the whole conversation.</p>
+      <div class="friend-results" aria-live="polite">
+        @if (searching()) {
+          <p class="search-state">Searching...</p>
+        } @else if (searchError()) {
+          <p class="search-state search-error" role="alert">{{ searchError() }}</p>
+        } @else if (searchQuery.trim() && friends().length === 0) {
+          <p class="search-state">No users found.</p>
+        }
+
+        @for (friend of friends(); track friend.userId) {
+          <button
+            class="friend-row"
+            [class.selected]="selectedFriend()?.userId === friend.userId"
+            type="button"
+            (click)="openConversation(friend)"
+          >
+            <span class="friend-avatar" aria-hidden="true">{{ friend.username.charAt(0).toUpperCase() || '?' }}</span>
+            <span class="friend-name">{{ friend.username }}</span>
+          </button>
+        }
       </div>
-      <label class="name-field">
-        <span class="section-label">YOU ARE</span>
-        <span class="name-input-wrap">
-          <span class="profile-avatar" aria-hidden="true">{{ displayName.trim().charAt(0) || '?' }}</span>
-          <input [(ngModel)]="displayName" name="displayName" maxlength="32" aria-label="Your display name" />
-        </span>
-      </label>
     </div>
   </aside>
 
   <main class="conversation">
     <header class="conversation-header">
       <div class="room-heading">
-        <div class="eyebrow">THE SHARED ROOM</div>
-        <h1><span>#</span> lobby</h1>
-        <p>Messages go to everyone here.</p>
-      </div>
-      <div class="connection-area">
-        <div class="connection-state" [class.connected]="chat.status() === 'connected'" [class.reconnecting]="chat.status() === 'reconnecting'">
-          <span class="connection-dot" aria-hidden="true"></span>
-          @switch (chat.status()) {
-            @case ('connected') { <span>Connected</span> }
-            @case ('connecting') { <span>Connecting</span> }
-            @case ('reconnecting') { <span>Reconnecting</span> }
-            @default { <span>Offline</span> }
-          }
-        </div>
-        @if (chat.status() === 'disconnected') {
-          <button class="retry-button" type="button" (click)="chat.connect()" aria-label="Reconnect to chat">Retry</button>
+        @if (selectedFriend(); as friend) {
+          <div class="eyebrow">DIRECT CONVERSATION</div>
+          <h1>{{ friend.username }}</h1>
+          <p>Conversation with {{ friend.username }}</p>
+        } @else {
+          <div class="eyebrow">YOUR MESSAGES</div>
+          <h1>Find a friend</h1>
+          <p>Search for someone to open a conversation.</p>
         }
       </div>
     </header>
 
-    <section class="message-list" aria-label="Messages" aria-live="polite" aria-relevant="additions">
-      @if (chat.messages().length === 0) {
+    <section class="message-list" aria-label="Conversation">
+      @if (selectedFriend()) {
+        <div class="empty-state">
+          <div class="empty-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="eyebrow">PRIVATE CHAT</div>
+          <h2>Conversation selected.</h2>
+          <p>Private messaging is not available from the current chat service.</p>
+        </div>
+      } @else {
         <div class="empty-state">
           <div class="empty-mark" aria-hidden="true"><span></span><span></span><span></span></div>
           <div class="eyebrow">A GOOD PLACE TO BEGIN</div>
-          <h2>Make the first<br />move.</h2>
-          <p>Say hello, share a thought, or just see who’s around.</p>
-        </div>
-      } @else {
-        <div class="message-list-inner">
-          <div class="day-divider"><span>THE CONVERSATION</span></div>
-          @for (item of chat.messages(); track item.id) {
-            <article class="message" [class.own-message]="item.user === displayName.trim()">
-              <div class="message-avatar" aria-hidden="true">{{ item.user.charAt(0).toUpperCase() || '?' }}</div>
-              <div class="message-body">
-                <div class="message-meta">
-                  <span class="message-author">{{ item.user }}</span>
-                  <time>{{ item.receivedAt | date:'shortTime' }}</time>
-                </div>
-                <p>{{ item.message }}</p>
-              </div>
-            </article>
-          }
+          <h2>Find someone<br />to talk to.</h2>
+          <p>Search for a username in the sidebar to open a conversation.</p>
         </div>
       }
     </section>
-
-    <footer class="composer-wrap">
-      @if (chat.error()) {
-        <div class="connection-error" role="status">{{ chat.error() }}</div>
-      }
-      <form class="composer" (ngSubmit)="send()">
-        <textarea
-          [(ngModel)]="draft"
-          name="message"
-          rows="1"
-          maxlength="2000"
-          placeholder="Write something worth sharing..."
-          aria-label="Message"
-          (keydown.enter)="handleEnter($event)"
-        ></textarea>
-        <div class="composer-footer">
-          <span class="composer-hint">Enter to send <span aria-hidden="true">·</span> Shift + Enter for a new line</span>
-          <button class="send-button" type="submit" [disabled]="!draft.trim() || !displayName.trim() || chat.status() !== 'connected' || sending" aria-label="Send message">
-            <span>Send</span>
-            <span class="send-arrow" aria-hidden="true">↗</span>
-          </button>
-        </div>
-      </form>
-      <div class="footer-caption"><span class="footer-star" aria-hidden="true">✳</span> A conversation, in real time.</div>
-    </footer>
   </main>
 </div>
