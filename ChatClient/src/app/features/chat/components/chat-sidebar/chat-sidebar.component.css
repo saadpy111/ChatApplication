@@ -1,0 +1,37 @@
+:host { display: block; min-width: 0; }
+
+.sidebar {
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+  padding: 30px 20px 22px;
+  color: #f4f4e9;
+  background: #19332f;
+}
+
+.brand { display: flex; align-items: center; gap: 11px; color: inherit; text-decoration: none; }
+.brand-mark { display: grid; width: 34px; flex: 0 0 auto; aspect-ratio: 1; place-items: center; border-radius: 50%; color: #19332f; background: #d3e4b9; font: 700 23px/1 Georgia, serif; }
+.brand-name { font-size: 15px; font-weight: 700; }
+.sidebar-section { margin-top: 67px; }
+.section-label { color: #a3b8a6; font: 700 10px "Courier New", monospace; }
+.sidebar-section h2 { margin: 9px 0 13px; font: 400 20px Georgia, "Times New Roman", serif; }
+
+.search-input { width: 100%; min-width: 0; height: 40px; padding: 0 11px; border: 1px solid rgb(255 255 255 / 20%); border-radius: 3px; outline: 0; color: #fffdf4; background: rgb(255 255 255 / 7%); font: 12px "Trebuchet MS", "Segoe UI", sans-serif; }
+.search-input::placeholder { color: #a3b8a6; }
+.search-input:focus { border-color: #d3e4b9; box-shadow: 0 0 0 2px rgb(211 228 185 / 12%); }
+.friend-results { display: grid; max-height: min(42dvh, 360px); gap: 4px; margin-top: 9px; overflow: auto; }
+.search-state { margin: 7px 2px; color: #bdc9bb; font-size: 12px; line-height: 1.5; }
+.search-error { color: #ffc2ad; }
+.friend-row { display: flex; min-width: 0; align-items: center; gap: 10px; padding: 8px; border: 0; border-radius: 3px; color: #f4f4e9; background: transparent; text-align: left; cursor: pointer; }
+.friend-row:hover, .friend-row.selected { background: rgb(255 255 255 / 10%); }
+.friend-row:focus-visible { outline: 2px solid #d3e4b9; outline-offset: 1px; }
+.friend-avatar { display: grid; width: 29px; flex: 0 0 auto; aspect-ratio: 1; place-items: center; border-radius: 50%; color: #19332f; background: #d3e4b9; font: 700 12px Georgia, serif; }
+.friend-name { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 700px) {
+  .sidebar { min-height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; padding: 13px 18px; }
+  .brand-mark { width: 30px; font-size: 20px; }
+  .brand-name { font-size: 14px; }
+  .sidebar-section { width: 100%; margin-top: 3px; }
+  .friend-results { max-height: 180px; }
+}

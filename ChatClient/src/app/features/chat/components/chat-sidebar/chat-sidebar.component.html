@@ -1,0 +1,42 @@
+<aside class="sidebar" aria-label="Chat navigation">
+  <a class="brand" href="/" aria-label="Commonroom home">
+    <span class="brand-mark" aria-hidden="true">c</span>
+    <span class="brand-name">commonroom</span>
+  </a>
+
+  <section class="sidebar-section" aria-labelledby="search-heading">
+    <div class="section-label">YOUR SPACE</div>
+    <h2 id="search-heading">Search friends</h2>
+    <input
+      class="search-input"
+      [(ngModel)]="searchQuery"
+      (ngModelChange)="searchFriends($event)"
+      type="search"
+      placeholder="Find a username"
+      aria-label="Search friends"
+      autocomplete="off"
+    />
+
+    <div class="friend-results" aria-live="polite">
+      @if (searching()) {
+        <p class="search-state">Searching...</p>
+      } @else if (searchError()) {
+        <p class="search-state search-error" role="alert">{{ searchError() }}</p>
+      } @else if (searchQuery.trim() && friends().length === 0) {
+        <p class="search-state">No users found.</p>
+      }
+
+      @for (friend of friends(); track friend.userId) {
+        <button
+          class="friend-row"
+          [class.selected]="selectedFriend()?.userId === friend.userId"
+          type="button"
+          (click)="selectFriend(friend)"
+        >
+          <span class="friend-avatar" aria-hidden="true">{{ friend.username.charAt(0).toUpperCase() || '?' }}</span>
+          <span class="friend-name">{{ friend.username }}</span>
+        </button>
+      }
+    </div>
+  </section>
+</aside>

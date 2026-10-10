@@ -1,0 +1,71 @@
+<main class="auth-shell">
+  <a class="brand" routerLink="/auth/login" aria-label="Commonroom home">
+    <span class="brand-mark" aria-hidden="true">c</span>
+    <span>commonroom</span>
+  </a>
+
+  <section class="auth-card" aria-labelledby="login-title">
+    <div class="card-heading">
+      <p class="eyebrow">WELCOME BACK</p>
+      <h1 id="login-title">Sign in</h1>
+      <p class="intro">Pick up where your conversations left off.</p>
+    </div>
+
+    @if (registrationComplete) {
+      <p class="notice success" role="status">Your account is ready. Sign in to continue.</p>
+    }
+    @if (serverError()) {
+      <p class="notice error" role="alert">{{ serverError() }}</p>
+    }
+
+    <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+      <div class="field">
+        <label for="username">Username</label>
+        <input id="username" type="text" formControlName="username" autocomplete="username" autofocus />
+        @if (form.controls.username.touched && form.controls.username.hasError('required')) {
+          <span class="field-error">Enter your username.</span>
+        }
+      </div>
+
+      <div class="field">
+        <label for="password">Password</label>
+        <div class="password-wrap">
+          <input
+            id="password"
+            [type]="passwordVisible() ? 'text' : 'password'"
+            formControlName="password"
+            autocomplete="current-password"
+          />
+          <button
+            class="visibility-toggle"
+            type="button"
+            [attr.aria-label]="passwordVisible() ? 'Hide password' : 'Show password'"
+            [attr.aria-pressed]="passwordVisible()"
+            (click)="passwordVisible.update((visible) => !visible)"
+          >
+            {{ passwordVisible() ? 'Hide' : 'Show' }}
+          </button>
+        </div>
+        @if (form.controls.password.touched && form.controls.password.hasError('required')) {
+          <span class="field-error">Enter your password.</span>
+        } @else if (form.controls.password.touched && form.controls.password.hasError('minlength')) {
+          <span class="field-error">Password must be at least 8 characters.</span>
+        }
+      </div>
+
+      <button class="submit-button" type="submit" [disabled]="form.invalid || isSubmitting()">
+        @if (isSubmitting()) {
+          <span class="spinner" aria-hidden="true"></span>
+          <span>Signing in</span>
+        } @else {
+          <span>Sign in</span>
+          <span aria-hidden="true">&#8594;</span>
+        }
+      </button>
+    </form>
+
+    <p class="switch-prompt">New to Commonroom? <a routerLink="/auth/register">Create an account</a></p>
+  </section>
+
+  <p class="page-note">A little more room for good conversation.</p>
+</main>
