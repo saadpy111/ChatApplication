@@ -27,12 +27,24 @@
     </div>
   </header>
 
-  <section class="message-list" aria-label="Conversation" aria-live="polite" aria-relevant="additions">
+  <section #messageList class="message-list" aria-label="Conversation" aria-live="polite" aria-relevant="additions" (scroll)="handleScroll($event)">
     @if (!friend()) {
       <div class="empty-state">
         <div class="eyebrow">A GOOD PLACE TO BEGIN</div>
         <h2>Find someone<br />to talk to.</h2>
         <p>Search for a username in the sidebar to open a conversation.</p>
+      </div>
+    } @else if (initialLoading()) {
+      <div class="empty-state" role="status">
+        <div class="eyebrow">DIRECT CONVERSATION</div>
+        <h2>Loading messages...</h2>
+      </div>
+    } @else if (historyError() && messages().length === 0) {
+      <div class="empty-state">
+        <div class="eyebrow">MESSAGE HISTORY</div>
+        <h2>Could not load messages.</h2>
+        <p>{{ historyError() }}</p>
+        <button class="retry-button" type="button" (click)="retryHistory.emit()">Retry</button>
       </div>
     } @else if (messages().length === 0) {
       <div class="empty-state">
@@ -42,6 +54,14 @@
       </div>
     } @else {
       <div class="message-list-inner">
+        @if (loadingOlder()) {
+          <p class="history-status" role="status">Loading older messages...</p>
+        } @else if (historyError()) {
+          <p class="history-status" role="alert">
+            {{ historyError() }}
+            <button class="retry-button" type="button" (click)="loadOlder.emit()">Retry</button>
+          </p>
+        }
         @for (message of messages(); track message.id) {
           <article class="message" [class.own-message]="message.sender === 'me'">
             <div class="message-avatar" aria-hidden="true">{{ message.sender === 'me' ? 'Y' : (friend()?.username?.charAt(0)?.toUpperCase() || '?') }}</div>
@@ -71,12 +91,12 @@
           maxlength="2000"
           placeholder="Write a message..."
           aria-label="Message"
-          [disabled]="connectionStatus() !== 'connected' || sending()"
+          [disabled]="!conversationId() || connectionStatus() !== 'connected' || sending()"
           (keydown.enter)="handleEnter($event)"
         ></textarea>
         <div class="composer-footer">
           <span class="composer-hint">Enter to send <span aria-hidden="true">·</span> Shift + Enter for a new line</span>
-          <button class="send-button" type="submit" [disabled]="!draft.trim() || connectionStatus() !== 'connected' || sending()" aria-label="Send message">
+          <button class="send-button" type="submit" [disabled]="!draft.trim() || !conversationId() || connectionStatus() !== 'connected' || sending()" aria-label="Send message">
             <span>{{ sending() ? 'Sending' : 'Send' }}</span>
             <span class="send-arrow" aria-hidden="true">↗</span>
           </button>

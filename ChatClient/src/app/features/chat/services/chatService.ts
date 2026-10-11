@@ -1,15 +1,20 @@
 import { inject, Injectable, signal } from '@angular/core';
 import { HubConnection, HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr';
+import { Subject } from 'rxjs';
 import { AuthService } from '../../../core/services/auth.service';
+import { PersistedMessage } from '../models/conversation.model';
 import { ChatConnectionStatus } from '../models/chat-message.model';
 
 @Injectable({ providedIn: 'root' })
 export class ChatService {
   private readonly authService = inject(AuthService);
-  private readonly messageListeners = new Set<(message: string) => void>();
+  private readonly incomingMessagesSubject = new Subject<PersistedMessage>();
+  private readonly reconnectedSubject = new Subject<void>();
   private hubConnection: HubConnection | null = null;
   private connectionAttempt: Promise<void> | null = null;
 
+  readonly incomingMessages$ = this.incomingMessagesSubject.asObservable();
+  readonly reconnected$ = this.reconnectedSubject.asObservable();
   readonly status = signal<ChatConnectionStatus>('disconnected');
   readonly error = signal<string | null>(null);
 
@@ -43,18 +48,13 @@ export class ChatService {
     return attempt;
   }
 
-  async sendMessage(receiverId: string, message: string): Promise<void> {
+  async sendMessage(conversationId: number, message: string): Promise<PersistedMessage> {
     const connection = this.hubConnection;
     if (!connection || connection.state !== HubConnectionState.Connected) {
       throw new Error('The chat connection is not available.');
     }
 
-    await connection.invoke('SendMessage', receiverId, message);
-  }
-
-  onReceiveMessage(callback: (message: string) => void): () => void {
-    this.messageListeners.add(callback);
-    return () => this.messageListeners.delete(callback);
+    return connection.invoke<PersistedMessage>('SendMessage', conversationId, message);
   }
 
   private getOrCreateConnection(): HubConnection {
@@ -69,13 +69,14 @@ export class ChatService {
       .withAutomaticReconnect()
       .build();
 
-    connection.on('ReceiveMessage', (message: string) => {
-      this.messageListeners.forEach((listener) => listener(message));
+    connection.on('ReceiveMessage', (message: PersistedMessage) => {
+      this.incomingMessagesSubject.next(message);
     });
     connection.onreconnecting(() => this.status.set('reconnecting'));
     connection.onreconnected(() => {
       this.error.set(null);
       this.status.set('connected');
+      this.reconnectedSubject.next();
     });
     connection.onclose(() => this.status.set('disconnected'));
 

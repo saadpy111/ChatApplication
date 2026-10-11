@@ -3,6 +3,7 @@ using ChatApi.Data;
 using ChatApi.Hubs;
 using ChatApi.Models;
 using ChatApi.Services.Auth;
+using ChatApi.Services.Conversations;
 using ChatApi.Services.Users;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -107,6 +108,7 @@ builder.Services
 builder.Services.AddAuthorization();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IUserSearchService, UserSearchService>();
+builder.Services.AddScoped<IConversationService, ConversationService>();
 builder.Services.AddSignalR();
 
 var app = builder.Build();
