@@ -1,13 +1,15 @@
+import { DatePipe } from '@angular/common';
 import { Component, DestroyRef, inject, input, OnInit, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, debounceTime, distinctUntilChanged, finalize, of, Subject, switchMap } from 'rxjs';
 import { User } from '../../../users/models/user';
 import { UsersApiService } from '../../../users/data-access/users-api.service';
+import { ConversationSummary } from '../../models/conversation.model';
 
 @Component({
   selector: 'app-chat-sidebar',
-  imports: [FormsModule],
+  imports: [DatePipe, FormsModule],
   templateUrl: './chat-sidebar.component.html',
   styleUrl: './chat-sidebar.component.css',
 })
@@ -17,7 +19,14 @@ export class ChatSidebarComponent implements OnInit {
   private readonly searchTerms = new Subject<string>();
 
   readonly selectedFriend = input<User | null>(null);
+  readonly selectedConversationId = input<number | null>(null);
+  readonly conversations = input<ConversationSummary[]>([]);
+  readonly conversationsLoading = input(false);
+  readonly conversationsError = input<string | null>(null);
+  readonly openingConversation = input(false);
   readonly friendSelected = output<User>();
+  readonly conversationSelected = output<ConversationSummary>();
+  readonly retryConversations = output<void>();
   readonly friends = signal<User[]>([]);
   readonly searching = signal(false);
   readonly searchError = signal<string | null>(null);
@@ -55,5 +64,9 @@ export class ChatSidebarComponent implements OnInit {
 
   selectFriend(friend: User): void {
     this.friendSelected.emit(friend);
+  }
+
+  selectConversation(conversation: ConversationSummary): void {
+    this.conversationSelected.emit(conversation);
   }
 }

@@ -1,9 +1,13 @@
 import { Component, DestroyRef, inject, OnInit, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
 import { ChatMessage } from '../../models/chat-message.model';
+import { ConversationSummary, MessagePage, PersistedMessage } from '../../models/conversation.model';
 import { ChatConversationComponent } from '../../components/chat-conversation/chat-conversation.component';
 import { ChatSidebarComponent } from '../../components/chat-sidebar/chat-sidebar.component';
 import { User } from '../../../users/models/user';
 import { ChatService } from '../../services/chatService';
+import { ConversationsApiService } from '../../services/conversations-api.service';
 
 @Component({
   selector: 'app-chat',
@@ -14,27 +18,35 @@ import { ChatService } from '../../services/chatService';
 export class ChatComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
   readonly chatService = inject(ChatService);
+  private readonly conversationsApi = inject(ConversationsApiService);
+  readonly conversations = signal<ConversationSummary[]>([]);
   readonly selectedFriend = signal<User | null>(null);
+  readonly selectedConversationId = signal<number | null>(null);
   readonly messages = signal<ChatMessage[]>([]);
   readonly sending = signal(false);
+  readonly conversationsLoading = signal(true);
+  readonly conversationsError = signal<string | null>(null);
+  readonly initialLoading = signal(false);
+  readonly loadingOlder = signal(false);
+  readonly historyError = signal<string | null>(null);
+  readonly hasMore = signal(false);
+  readonly olderPageVersion = signal(0);
+  readonly openingConversation = signal(false);
+  private nextCursor: string | null = null;
+  private conversationLoadVersion = 0;
+  private conversationsLoadVersion = 0;
 
   ngOnInit(): void {
-    const unsubscribe = this.chatService.onReceiveMessage((text) => {
-      if (!this.selectedFriend()) {
-        return;
-      }
+    this.chatService.incomingMessages$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((message) => this.receiveMessage(message));
+    this.chatService.reconnected$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => void this.reconcileAfterReconnect());
 
-      this.messages.update((messages) => [
-        ...messages,
-        { id: this.nextMessageId++, text, sender: 'friend', sentAt: new Date() },
-      ]);
-    });
-    this.destroyRef.onDestroy(unsubscribe);
-
+    void this.loadConversations();
     void this.connect();
   }
-
-  private nextMessageId = 0;
 
   async connect(): Promise<void> {
     try {
@@ -44,16 +56,79 @@ export class ChatComponent implements OnInit {
     }
   }
 
-  openConversation(friend: User): void {
-    if (this.selectedFriend()?.userId !== friend.userId) {
-      this.messages.set([]);
-    }
+  async openConversation(friend: User): Promise<void> {
+    this.selectedConversationId.set(null);
     this.selectedFriend.set(friend);
+    this.messages.set([]);
+    this.openingConversation.set(true);
+    this.historyError.set(null);
+    try {
+      const opened = await firstValueFrom(this.conversationsApi.openConversation(friend.userId));
+      await this.loadConversations();
+      await this.activateConversation(opened.conversationId, {
+        userId: opened.userId,
+        username: opened.username,
+      });
+    } catch {
+      this.historyError.set('Could not open this conversation. Try again.');
+    } finally {
+      this.openingConversation.set(false);
+    }
+  }
+
+  openExistingConversation(conversation: ConversationSummary): void {
+    void this.activateConversation(conversation.conversationId, {
+      userId: conversation.otherUserId,
+      username: conversation.otherUsername,
+    });
+  }
+
+  retryCurrentConversation(): void {
+    const conversationId = this.selectedConversationId();
+    const friend = this.selectedFriend();
+    if (conversationId && friend) {
+      void this.activateConversation(conversationId, friend);
+    }
+  }
+
+  retryConversations(): void {
+    void this.loadConversations();
+  }
+
+  async loadOlderMessages(): Promise<void> {
+    const conversationId = this.selectedConversationId();
+    const cursor = this.nextCursor;
+    const loadVersion = this.conversationLoadVersion;
+    if (!conversationId || !cursor || !this.hasMore() || this.loadingOlder()) {
+      return;
+    }
+
+    this.loadingOlder.set(true);
+    this.historyError.set(null);
+    try {
+      const page = await firstValueFrom(this.conversationsApi.getMessages(conversationId, 30, cursor));
+      if (this.selectedConversationId() !== conversationId || this.conversationLoadVersion !== loadVersion) {
+        return;
+      }
+
+      this.messages.update((current) => this.mergeMessages(current, page.messages));
+      this.nextCursor = page.nextCursor;
+      this.hasMore.set(page.hasMore);
+      this.olderPageVersion.update((version) => version + 1);
+    } catch {
+      if (this.selectedConversationId() === conversationId && this.conversationLoadVersion === loadVersion) {
+        this.historyError.set('Older messages could not be loaded. Scroll up to retry.');
+      }
+    } finally {
+      if (this.conversationLoadVersion === loadVersion) {
+        this.loadingOlder.set(false);
+      }
+    }
   }
 
   async sendMessage(text: string): Promise<void> {
-    const friend = this.selectedFriend();
-    if (!friend || this.sending() || this.chatService.status() !== 'connected') {
+    const conversationId = this.selectedConversationId();
+    if (!conversationId || this.sending() || this.chatService.status() !== 'connected') {
       return;
     }
 
@@ -61,19 +136,160 @@ export class ChatComponent implements OnInit {
     this.chatService.error.set(null);
 
     try {
-      await this.chatService.sendMessage(friend.userId, text);
-      if (this.selectedFriend()?.userId !== friend.userId) {
-        return;
-      }
-
-      this.messages.update((messages) => [
-        ...messages,
-        { id: this.nextMessageId++, text, sender: 'me', sentAt: new Date() },
-      ]);
+      const message = await this.chatService.sendMessage(conversationId, text);
+      this.receiveMessage(message);
     } catch {
-      this.chatService.error.set('Your message could not be sent. Try again.');
+      await this.refreshAfterSendFailure(conversationId);
+      this.chatService.error.set('The message could not be confirmed. Check the conversation before retrying.');
     } finally {
       this.sending.set(false);
     }
+  }
+
+  private async activateConversation(conversationId: number, friend: User): Promise<void> {
+    const loadVersion = ++this.conversationLoadVersion;
+    this.selectedConversationId.set(conversationId);
+    this.selectedFriend.set(friend);
+    this.messages.set([]);
+    this.nextCursor = null;
+    this.hasMore.set(false);
+    this.loadingOlder.set(false);
+    this.initialLoading.set(true);
+    this.historyError.set(null);
+
+    try {
+      const page = await firstValueFrom(this.conversationsApi.getMessages(conversationId));
+      if (this.selectedConversationId() !== conversationId || this.conversationLoadVersion !== loadVersion) {
+        return;
+      }
+
+      this.messages.set(page.messages.map((message) => this.toChatMessage(message, friend)));
+      this.nextCursor = page.nextCursor;
+      this.hasMore.set(page.hasMore);
+    } catch {
+      if (this.selectedConversationId() === conversationId && this.conversationLoadVersion === loadVersion) {
+        this.historyError.set('Messages could not be loaded. Retry to try again.');
+      }
+    } finally {
+      if (this.selectedConversationId() === conversationId && this.conversationLoadVersion === loadVersion) {
+        this.initialLoading.set(false);
+      }
+    }
+  }
+
+  private async loadConversations(): Promise<void> {
+    const loadVersion = ++this.conversationsLoadVersion;
+    this.conversationsLoading.set(true);
+    this.conversationsError.set(null);
+    try {
+      const conversations = await firstValueFrom(this.conversationsApi.getConversations());
+      if (this.conversationsLoadVersion === loadVersion) {
+        this.conversations.set(conversations);
+      }
+    } catch {
+      if (this.conversationsLoadVersion === loadVersion) {
+        this.conversationsError.set('Conversations could not be loaded. Try again.');
+      }
+    } finally {
+      if (this.conversationsLoadVersion === loadVersion) {
+        this.conversationsLoading.set(false);
+      }
+    }
+  }
+
+  private receiveMessage(message: PersistedMessage): void {
+    this.updateSidebar(message);
+    const friend = this.selectedFriend();
+    if (this.selectedConversationId() !== message.conversationId || !friend) {
+      return;
+    }
+
+    this.messages.update((current) => this.mergeMessages(current, [message], friend));
+  }
+
+  private updateSidebar(message: PersistedMessage): void {
+    const existing = this.conversations().find((item) => item.conversationId === message.conversationId);
+    if (!existing) {
+      void this.loadConversations();
+      return;
+    }
+
+    const updated = {
+      ...existing,
+      lastMessagePreview: message.content,
+      lastMessageAt: message.createdAt,
+    };
+    this.conversations.update((items) => [
+      updated,
+      ...items.filter((item) => item.conversationId !== message.conversationId),
+    ].sort((left, right) => {
+      const leftDate = Date.parse(left.lastMessageAt ?? left.createdAt);
+      const rightDate = Date.parse(right.lastMessageAt ?? right.createdAt);
+      return rightDate - leftDate || right.conversationId - left.conversationId;
+    }));
+  }
+
+  private async reconcileAfterReconnect(): Promise<void> {
+    await this.loadConversations();
+    const conversationId = this.selectedConversationId();
+    const friend = this.selectedFriend();
+    if (!conversationId || !friend) {
+      return;
+    }
+
+    try {
+      const page = await firstValueFrom(this.conversationsApi.getMessages(conversationId));
+      if (this.selectedConversationId() === conversationId) {
+        this.messages.update((current) => this.mergeMessages(current, page.messages, friend));
+      }
+    } catch {
+      this.historyError.set('Could not sync recent messages after reconnecting.');
+    }
+  }
+
+  private async refreshAfterSendFailure(conversationId: number): Promise<void> {
+    const friend = this.selectedFriend();
+    if (!friend || this.selectedConversationId() !== conversationId) {
+      return;
+    }
+
+    try {
+      const page: MessagePage = await firstValueFrom(this.conversationsApi.getMessages(conversationId));
+      if (this.selectedConversationId() === conversationId) {
+        this.messages.update((current) => this.mergeMessages(current, page.messages, friend));
+        this.nextCursor = this.nextCursor ?? page.nextCursor;
+        this.hasMore.set(this.hasMore() || page.hasMore);
+      }
+    } catch {
+      // Keep the send error visible if history is unavailable too.
+    }
+  }
+
+  private mergeMessages(
+    current: ChatMessage[],
+    incoming: PersistedMessage[],
+    friend = this.selectedFriend(),
+  ): ChatMessage[] {
+    if (!friend) {
+      return current;
+    }
+
+    const byId = new Map(current.map((message) => [message.id, message]));
+    for (const message of incoming) {
+      byId.set(message.id, this.toChatMessage(message, friend));
+    }
+
+    return [...byId.values()].sort((left, right) =>
+      left.sentAt.getTime() - right.sentAt.getTime() || left.id - right.id,
+    );
+  }
+
+  private toChatMessage(message: PersistedMessage, friend: User): ChatMessage {
+    return {
+      id: message.id,
+      text: message.content,
+      sender: message.senderId === friend.userId ? 'friend' : 'me',
+      sentAt: new Date(message.createdAt),
+    };
   }
 }

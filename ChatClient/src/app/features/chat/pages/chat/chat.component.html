@@ -1,15 +1,30 @@
 <div class="chat-shell">
   <app-chat-sidebar
+    [conversations]="conversations()"
+    [conversationsLoading]="conversationsLoading()"
+    [conversationsError]="conversationsError()"
+    [openingConversation]="openingConversation()"
+    (retryConversations)="retryConversations()"
     [selectedFriend]="selectedFriend()"
+    [selectedConversationId]="selectedConversationId()"
     (friendSelected)="openConversation($event)"
+    (conversationSelected)="openExistingConversation($event)"
   />
   <app-chat-conversation
     [friend]="selectedFriend()"
+    [conversationId]="selectedConversationId()"
     [messages]="messages()"
+    [initialLoading]="initialLoading()"
+    [loadingOlder]="loadingOlder()"
+    [historyError]="historyError()"
+    [hasMore]="hasMore()"
+    [olderPageVersion]="olderPageVersion()"
     [connectionStatus]="chatService.status()"
     [connectionError]="chatService.error()"
     [sending]="sending()"
     (messageSubmitted)="sendMessage($event)"
+    (loadOlder)="loadOlderMessages()"
+    (retryHistory)="retryCurrentConversation()"
     (retryConnection)="connect()"
   />
 </div>

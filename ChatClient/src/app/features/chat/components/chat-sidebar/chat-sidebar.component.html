@@ -4,7 +4,42 @@
     <span class="brand-name">commonroom</span>
   </a>
 
-  <section class="sidebar-section" aria-labelledby="search-heading">
+  <section class="sidebar-section conversations-section" aria-labelledby="conversations-heading">
+    <div class="section-label">YOUR MESSAGES</div>
+    <h2 id="conversations-heading">Conversations</h2>
+    <div class="conversation-list" aria-live="polite">
+      @if (conversationsLoading()) {
+        <p class="search-state">Loading conversations...</p>
+      } @else if (conversationsError()) {
+        <p class="search-state search-error" role="alert">
+          {{ conversationsError() }}
+          <button class="retry-link" type="button" (click)="retryConversations.emit()">Retry</button>
+        </p>
+      } @else if (conversations().length === 0) {
+        <p class="search-state">No conversations yet.</p>
+      }
+
+      @for (conversation of conversations(); track conversation.conversationId) {
+        <button
+          class="friend-row conversation-row"
+          [class.selected]="selectedConversationId() === conversation.conversationId"
+          type="button"
+          (click)="selectConversation(conversation)"
+        >
+          <span class="friend-avatar" aria-hidden="true">{{ conversation.otherUsername.charAt(0).toUpperCase() || '?' }}</span>
+          <span class="conversation-copy">
+            <span class="friend-name">{{ conversation.otherUsername }}</span>
+            <span class="conversation-preview">{{ conversation.lastMessagePreview || 'Start a conversation' }}</span>
+          </span>
+          @if (conversation.lastMessageAt; as lastMessageAt) {
+            <time class="conversation-time">{{ lastMessageAt | date:'shortTime' }}</time>
+          }
+        </button>
+      }
+    </div>
+  </section>
+
+  <section class="sidebar-section search-section" aria-labelledby="search-heading">
     <div class="section-label">YOUR SPACE</div>
     <h2 id="search-heading">Search friends</h2>
     <input
@@ -30,12 +65,16 @@
         <button
           class="friend-row"
           [class.selected]="selectedFriend()?.userId === friend.userId"
+          [disabled]="openingConversation()"
           type="button"
           (click)="selectFriend(friend)"
         >
           <span class="friend-avatar" aria-hidden="true">{{ friend.username.charAt(0).toUpperCase() || '?' }}</span>
           <span class="friend-name">{{ friend.username }}</span>
         </button>
+      }
+      @if (openingConversation()) {
+        <p class="search-state">Opening conversation...</p>
       }
     </div>
   </section>
