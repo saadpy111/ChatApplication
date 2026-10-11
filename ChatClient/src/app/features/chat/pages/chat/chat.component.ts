@@ -1,13 +1,14 @@
 import { Component, DestroyRef, inject, OnInit, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
-import { ChatMessage } from '../../models/chat-message.model';
+import { ChatMessage, MessageSendRequest, MessageSendResult } from '../../models/chat-message.model';
 import { ConversationSummary, MessagePage, PersistedMessage } from '../../models/conversation.model';
 import { ChatConversationComponent } from '../../components/chat-conversation/chat-conversation.component';
 import { ChatSidebarComponent } from '../../components/chat-sidebar/chat-sidebar.component';
 import { User } from '../../../users/models/user';
 import { ChatService } from '../../services/chatService';
 import { ConversationsApiService } from '../../services/conversations-api.service';
+import { AuthService } from '../../../../core/services/auth.service';
 
 @Component({
   selector: 'app-chat',
@@ -17,6 +18,7 @@ import { ConversationsApiService } from '../../services/conversations-api.servic
 })
 export class ChatComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
+  readonly authService = inject(AuthService);
   readonly chatService = inject(ChatService);
   private readonly conversationsApi = inject(ConversationsApiService);
   readonly conversations = signal<ConversationSummary[]>([]);
@@ -24,6 +26,7 @@ export class ChatComponent implements OnInit {
   readonly selectedConversationId = signal<number | null>(null);
   readonly messages = signal<ChatMessage[]>([]);
   readonly sending = signal(false);
+  readonly sendResult = signal<MessageSendResult | null>(null);
   readonly conversationsLoading = signal(true);
   readonly conversationsError = signal<string | null>(null);
   readonly initialLoading = signal(false);
@@ -32,6 +35,7 @@ export class ChatComponent implements OnInit {
   readonly hasMore = signal(false);
   readonly olderPageVersion = signal(0);
   readonly openingConversation = signal(false);
+  readonly showConversationOnMobile = signal(false);
   private nextCursor: string | null = null;
   private conversationLoadVersion = 0;
   private conversationsLoadVersion = 0;
@@ -57,6 +61,7 @@ export class ChatComponent implements OnInit {
   }
 
   async openConversation(friend: User): Promise<void> {
+    this.showConversationOnMobile.set(true);
     this.selectedConversationId.set(null);
     this.selectedFriend.set(friend);
     this.messages.set([]);
@@ -81,6 +86,10 @@ export class ChatComponent implements OnInit {
       userId: conversation.otherUserId,
       username: conversation.otherUsername,
     });
+  }
+
+  showConversationListOnMobile(): void {
+    this.showConversationOnMobile.set(false);
   }
 
   retryCurrentConversation(): void {
@@ -126,9 +135,10 @@ export class ChatComponent implements OnInit {
     }
   }
 
-  async sendMessage(text: string): Promise<void> {
-    const conversationId = this.selectedConversationId();
-    if (!conversationId || this.sending() || this.chatService.status() !== 'connected') {
+  async sendMessage(request: MessageSendRequest): Promise<void> {
+    const { conversationId, requestId, text } = request;
+    if (this.selectedConversationId() !== conversationId || this.sending() || this.chatService.status() !== 'connected') {
+      this.sendResult.set({ requestId, conversationId, succeeded: false });
       return;
     }
 
@@ -138,9 +148,11 @@ export class ChatComponent implements OnInit {
     try {
       const message = await this.chatService.sendMessage(conversationId, text);
       this.receiveMessage(message);
+      this.sendResult.set({ requestId, conversationId, succeeded: true });
     } catch {
       await this.refreshAfterSendFailure(conversationId);
       this.chatService.error.set('The message could not be confirmed. Check the conversation before retrying.');
+      this.sendResult.set({ requestId, conversationId, succeeded: false });
     } finally {
       this.sending.set(false);
     }
@@ -148,6 +160,7 @@ export class ChatComponent implements OnInit {
 
   private async activateConversation(conversationId: number, friend: User): Promise<void> {
     const loadVersion = ++this.conversationLoadVersion;
+    this.showConversationOnMobile.set(true);
     this.selectedConversationId.set(conversationId);
     this.selectedFriend.set(friend);
     this.messages.set([]);
@@ -288,7 +301,7 @@ export class ChatComponent implements OnInit {
     return {
       id: message.id,
       text: message.content,
-      sender: message.senderId === friend.userId ? 'friend' : 'me',
+      senderId: message.senderId,
       sentAt: new Date(message.createdAt),
     };
   }

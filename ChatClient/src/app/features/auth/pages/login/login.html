@@ -1,14 +1,8 @@
 <main class="auth-shell">
-  <a class="brand" routerLink="/auth/login" aria-label="Commonroom home">
-    <span class="brand-mark" aria-hidden="true">c</span>
-    <span>commonroom</span>
-  </a>
-
   <section class="auth-card" aria-labelledby="login-title">
     <div class="card-heading">
-      <p class="eyebrow">WELCOME BACK</p>
       <h1 id="login-title">Sign in</h1>
-      <p class="intro">Pick up where your conversations left off.</p>
+      <p class="intro">Sign in to continue your conversations.</p>
     </div>
 
     @if (registrationComplete) {
@@ -64,8 +58,6 @@
       </button>
     </form>
 
-    <p class="switch-prompt">New to Commonroom? <a routerLink="/auth/register">Create an account</a></p>
+    <p class="switch-prompt">New here? <a routerLink="/auth/register">Create an account</a></p>
   </section>
-
-  <p class="page-note">A little more room for good conversation.</p>
 </main>

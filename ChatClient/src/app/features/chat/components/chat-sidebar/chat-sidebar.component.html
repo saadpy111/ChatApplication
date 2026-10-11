@@ -1,60 +1,19 @@
 <aside class="sidebar" aria-label="Chat navigation">
-  <a class="brand" href="/" aria-label="Commonroom home">
-    <span class="brand-mark" aria-hidden="true">c</span>
-    <span class="brand-name">commonroom</span>
-  </a>
-
-  <section class="sidebar-section conversations-section" aria-labelledby="conversations-heading">
-    <div class="section-label">YOUR MESSAGES</div>
-    <h2 id="conversations-heading">Conversations</h2>
-    <div class="conversation-list" aria-live="polite">
-      @if (conversationsLoading()) {
-        <p class="search-state">Loading conversations...</p>
-      } @else if (conversationsError()) {
-        <p class="search-state search-error" role="alert">
-          {{ conversationsError() }}
-          <button class="retry-link" type="button" (click)="retryConversations.emit()">Retry</button>
-        </p>
-      } @else if (conversations().length === 0) {
-        <p class="search-state">No conversations yet.</p>
-      }
-
-      @for (conversation of conversations(); track conversation.conversationId) {
-        <button
-          class="friend-row conversation-row"
-          [class.selected]="selectedConversationId() === conversation.conversationId"
-          type="button"
-          (click)="selectConversation(conversation)"
-        >
-          <span class="friend-avatar" aria-hidden="true">{{ conversation.otherUsername.charAt(0).toUpperCase() || '?' }}</span>
-          <span class="conversation-copy">
-            <span class="friend-name">{{ conversation.otherUsername }}</span>
-            <span class="conversation-preview">{{ conversation.lastMessagePreview || 'Start a conversation' }}</span>
-          </span>
-          @if (conversation.lastMessageAt; as lastMessageAt) {
-            <time class="conversation-time">{{ lastMessageAt | date:'shortTime' }}</time>
-          }
-        </button>
-      }
-    </div>
-  </section>
-
   <section class="sidebar-section search-section" aria-labelledby="search-heading">
-    <div class="section-label">YOUR SPACE</div>
-    <h2 id="search-heading">Search friends</h2>
+    <h2 id="search-heading">Find a friend</h2>
     <input
       class="search-input"
       [(ngModel)]="searchQuery"
       (ngModelChange)="searchFriends($event)"
       type="search"
-      placeholder="Find a username"
-      aria-label="Search friends"
+      placeholder="Search by username"
+      aria-label="Search by username"
       autocomplete="off"
     />
 
     <div class="friend-results" aria-live="polite">
       @if (searching()) {
-        <p class="search-state">Searching...</p>
+        <p class="search-state" role="status">Searching...</p>
       } @else if (searchError()) {
         <p class="search-state search-error" role="alert">{{ searchError() }}</p>
       } @else if (searchQuery.trim() && friends().length === 0) {
@@ -75,6 +34,40 @@
       }
       @if (openingConversation()) {
         <p class="search-state">Opening conversation...</p>
+      }
+    </div>
+  </section>
+
+  <section class="sidebar-section conversations-section" aria-labelledby="conversations-heading">
+    <h2 id="conversations-heading">Conversations</h2>
+    <div class="conversation-list" aria-live="polite">
+      @if (conversationsLoading()) {
+        <p class="search-state" role="status">Loading conversations...</p>
+      } @else if (conversationsError()) {
+        <p class="search-state search-error" role="alert">
+          {{ conversationsError() }}
+          <button class="retry-link" type="button" (click)="retryConversations.emit()">Retry</button>
+        </p>
+      } @else if (conversations().length === 0) {
+        <p class="search-state">No conversations yet. Search for a username to start one.</p>
+      }
+
+      @for (conversation of conversations(); track conversation.conversationId) {
+        <button
+          class="friend-row conversation-row"
+          [class.selected]="selectedConversationId() === conversation.conversationId"
+          type="button"
+          (click)="selectConversation(conversation)"
+        >
+          <span class="friend-avatar" aria-hidden="true">{{ conversation.otherUsername.charAt(0).toUpperCase() || '?' }}</span>
+          <span class="conversation-copy">
+            <span class="friend-name">{{ conversation.otherUsername }}</span>
+            <span class="conversation-preview">{{ conversation.lastMessagePreview || 'Start a conversation' }}</span>
+          </span>
+          @if (conversation.lastMessageAt; as lastMessageAt) {
+            <time class="conversation-time">{{ lastMessageAt | date:'shortTime' }}</time>
+          }
+        </button>
       }
     </div>
   </section>

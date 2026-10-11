@@ -15,7 +15,7 @@ const passwordsMatchValidator: ValidatorFn = (control: AbstractControl): Validat
   selector: 'app-register',
   imports: [ReactiveFormsModule, RouterLink],
   templateUrl: './register.html',
-  styleUrl: './register.css',
+  styleUrl: '../../auth-layout.css',
 })
 export class RegisterComponent {
   private readonly formBuilder = inject(FormBuilder);

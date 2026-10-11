@@ -1,14 +1,16 @@
 <main class="conversation">
   <header class="conversation-header">
+    <button class="back-button" type="button" aria-label="Back to conversations" (click)="backToList.emit()">
+      <span aria-hidden="true">←</span>
+    </button>
+    @if (friend(); as selected) {
+      <span class="header-avatar" aria-hidden="true">{{ selected.username.charAt(0).toUpperCase() || '?' }}</span>
+    }
     <div class="room-heading">
       @if (friend(); as selected) {
-        <div class="eyebrow">DIRECT CONVERSATION</div>
         <h1>{{ selected.username }}</h1>
-        <p>Conversation with {{ selected.username }}</p>
       } @else {
-        <div class="eyebrow">YOUR MESSAGES</div>
-        <h1>Find a friend</h1>
-        <p>Search for someone to open a conversation.</p>
+        <h1>Messages</h1>
       }
     </div>
     <div class="connection-area">
@@ -30,27 +32,23 @@
   <section #messageList class="message-list" aria-label="Conversation" aria-live="polite" aria-relevant="additions" (scroll)="handleScroll($event)">
     @if (!friend()) {
       <div class="empty-state">
-        <div class="eyebrow">A GOOD PLACE TO BEGIN</div>
-        <h2>Find someone<br />to talk to.</h2>
-        <p>Search for a username in the sidebar to open a conversation.</p>
+        <h2>Choose a conversation</h2>
+        <p>Select a conversation or search for someone by username.</p>
       </div>
     } @else if (initialLoading()) {
       <div class="empty-state" role="status">
-        <div class="eyebrow">DIRECT CONVERSATION</div>
         <h2>Loading messages...</h2>
       </div>
     } @else if (historyError() && messages().length === 0) {
       <div class="empty-state">
-        <div class="eyebrow">MESSAGE HISTORY</div>
         <h2>Could not load messages.</h2>
         <p>{{ historyError() }}</p>
         <button class="retry-button" type="button" (click)="retryHistory.emit()">Retry</button>
       </div>
     } @else if (messages().length === 0) {
       <div class="empty-state">
-        <div class="eyebrow">PRIVATE CHAT</div>
         <h2>Say hello.</h2>
-        <p>Your messages with {{ friend()?.username }} will appear here.</p>
+        <p>Your messages will appear here.</p>
       </div>
     } @else {
       <div class="message-list-inner">
@@ -63,14 +61,14 @@
           </p>
         }
         @for (message of messages(); track message.id) {
-          <article class="message" [class.own-message]="message.sender === 'me'">
-            <div class="message-avatar" aria-hidden="true">{{ message.sender === 'me' ? 'Y' : (friend()?.username?.charAt(0)?.toUpperCase() || '?') }}</div>
+          <article class="message" [class.own-message]="message.senderId === currentUserId()">
+            <div class="message-avatar" aria-hidden="true">{{ message.senderId === currentUserId() ? (currentUsername().charAt(0).toUpperCase() || '?') : (friend()?.username?.charAt(0)?.toUpperCase() || '?') }}</div>
             <div class="message-body">
               <div class="message-meta">
-                <span class="message-author">{{ message.sender === 'me' ? 'You' : friend()?.username }}</span>
+                <span class="message-author">{{ message.senderId === currentUserId() ? 'You' : friend()?.username }}</span>
                 <time>{{ message.sentAt | date:'shortTime' }}</time>
               </div>
-              <p>{{ message.text }}</p>
+              <p dir="auto">{{ message.text }}</p>
             </div>
           </article>
         }
@@ -85,6 +83,7 @@
       }
       <form class="composer" (ngSubmit)="send()">
         <textarea
+          #messageInput
           [(ngModel)]="draft"
           name="message"
           rows="1"
@@ -96,7 +95,7 @@
         ></textarea>
         <div class="composer-footer">
           <span class="composer-hint">Enter to send <span aria-hidden="true">·</span> Shift + Enter for a new line</span>
-          <button class="send-button" type="submit" [disabled]="!draft.trim() || !conversationId() || connectionStatus() !== 'connected' || sending()" aria-label="Send message">
+          <button #sendButton class="send-button" type="submit" [disabled]="!draft.trim() || !conversationId() || connectionStatus() !== 'connected' || sending()" aria-label="Send message">
             <span>{{ sending() ? 'Sending' : 'Send' }}</span>
             <span class="send-arrow" aria-hidden="true">↗</span>
           </button>

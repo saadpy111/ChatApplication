@@ -1,4 +1,4 @@
-<div class="chat-shell">
+<div class="chat-shell" [class.mobile-conversation-open]="showConversationOnMobile()">
   <app-chat-sidebar
     [conversations]="conversations()"
     [conversationsLoading]="conversationsLoading()"
@@ -13,6 +13,7 @@
   <app-chat-conversation
     [friend]="selectedFriend()"
     [conversationId]="selectedConversationId()"
+    [conversationActive]="showConversationOnMobile()"
     [messages]="messages()"
     [initialLoading]="initialLoading()"
     [loadingOlder]="loadingOlder()"
@@ -22,9 +23,13 @@
     [connectionStatus]="chatService.status()"
     [connectionError]="chatService.error()"
     [sending]="sending()"
+    [sendResult]="sendResult()"
+    [currentUserId]="authService.currentUser()?.userId ?? null"
+    [currentUsername]="authService.currentUser()?.username ?? ''"
     (messageSubmitted)="sendMessage($event)"
     (loadOlder)="loadOlderMessages()"
     (retryHistory)="retryCurrentConversation()"
     (retryConnection)="connect()"
+    (backToList)="showConversationListOnMobile()"
   />
 </div>
