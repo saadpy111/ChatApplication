@@ -1,25 +1,18 @@
 <main class="auth-shell">
-  <a class="brand" routerLink="/auth/login" aria-label="Commonroom home">
-    <span class="brand-mark" aria-hidden="true">c</span>
-    <span>commonroom</span>
-  </a>
-
   <section class="auth-card" aria-labelledby="register-title">
     @if (registrationComplete()) {
       <div class="completion" role="status">
         <span class="completion-mark" aria-hidden="true">&#10003;</span>
-        <p class="eyebrow">ACCOUNT CREATED</p>
         <h1 id="register-title">You’re all set.</h1>
-        <p class="intro">Your Commonroom account is ready. Sign in to continue.</p>
+        <p class="intro">Your account is ready. Sign in to continue.</p>
         <a class="submit-button continue-link" routerLink="/auth/login" [queryParams]="{ registered: true }">
           <span>Go to sign in</span><span aria-hidden="true">&#8594;</span>
         </a>
       </div>
     } @else {
       <div class="card-heading">
-        <p class="eyebrow">MAKE YOURSELF AT HOME</p>
         <h1 id="register-title">Create an account</h1>
-        <p class="intro">A good conversation starts with a hello.</p>
+        <p class="intro">Create an account to start chatting.</p>
       </div>
 
       @if (serverError()) {
@@ -122,5 +115,4 @@
     }
   </section>
 
-  <p class="page-note">A little more room for good conversation.</p>
 </main>

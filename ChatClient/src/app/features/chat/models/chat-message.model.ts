@@ -1,8 +1,20 @@
 export interface ChatMessage {
   id: number;
   text: string;
-  sender: 'me' | 'friend';
+  senderId: string;
   sentAt: Date;
 }
 
 export type ChatConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
+
+export interface MessageSendRequest {
+  requestId: number;
+  conversationId: number;
+  text: string;
+}
+
+export interface MessageSendResult {
+  requestId: number;
+  conversationId: number;
+  succeeded: boolean;
+}

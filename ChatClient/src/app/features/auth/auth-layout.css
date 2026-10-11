@@ -1,0 +1,157 @@
+:host {
+  --app-bg: #0b1120;
+  --sidebar-bg: #111827;
+  --surface: #182235;
+  --border: #263449;
+  --text: #f1f5f9;
+  --muted: #94a3b8;
+  --accent: #6366f1;
+  --accent-hover: #4f46e5;
+  --online: #22c55e;
+  --error: #f87171;
+  --input-bg: #172033;
+  display: block;
+  min-width: 0;
+  min-height: 100dvh;
+  color: var(--text);
+  font-family: "Segoe UI", sans-serif;
+}
+
+.auth-shell {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+  background: radial-gradient(ellipse at 50% 0%, rgb(99 102 241 / 8%), transparent 56%), var(--app-bg);
+}
+
+.auth-card {
+  width: min(100%, 460px);
+  padding: 36px 38px 32px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--sidebar-bg);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 24%);
+}
+
+.card-heading h1,
+.completion h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 27px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.intro {
+  margin: 9px 0 25px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.field label {
+  color: #dbe3ef;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.field input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--input-bg);
+  font: inherit;
+  font-size: 16px;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.field input::placeholder { color: var(--muted); }
+.field input:focus { border-color: var(--accent); outline: 0; box-shadow: 0 0 0 3px rgb(99 102 241 / 22%); }
+.password-wrap { position: relative; }
+.password-wrap input { padding-right: 82px; }
+
+.visibility-toggle {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  min-width: 54px;
+  min-height: 42px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  color: #c7d2fe;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.visibility-toggle:hover { color: var(--text); background: var(--surface); }
+.visibility-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.field-error { color: var(--error); font-size: 12px; line-height: 1.4; }
+
+.notice {
+  margin: 0 0 18px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid;
+  border-radius: 5px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.notice.error { border-left-color: var(--error); color: #fecaca; background: rgb(248 113 113 / 8%); }
+.notice.success { border-left-color: var(--online); color: #bbf7d0; background: rgb(34 197 94 / 8%); }
+
+.submit-button {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 25px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 6px;
+  color: #fff;
+  background: var(--accent);
+  font: 600 14px "Segoe UI", sans-serif;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.submit-button:hover:not(:disabled) { background: var(--accent-hover); }
+.submit-button:focus-visible { outline: 2px solid #a5b4fc; outline-offset: 3px; }
+.submit-button:disabled { color: #cbd5e1; background: #39465c; cursor: not-allowed; }
+.spinner { width: 16px; height: 16px; border: 2px solid rgb(255 255 255 / 45%); border-top-color: #fff; border-radius: 50%; animation: spin 700ms linear infinite; }
+.switch-prompt { margin: 23px 0 0; color: var(--muted); text-align: center; font-size: 13px; line-height: 1.5; }
+.switch-prompt a { color: #a5b4fc; font-weight: 600; text-underline-offset: 3px; }
+.switch-prompt a:hover { color: var(--text); }
+.completion { text-align: center; }
+.completion-mark { display: grid; width: 44px; aspect-ratio: 1; place-items: center; margin: 0 auto 18px; border-radius: 50%; color: #bbf7d0; background: rgb(34 197 94 / 12%); font-size: 21px; }
+.completion .intro { margin: 10px 0 0; }
+.continue-link { margin-top: 25px; text-align: left; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 480px) {
+  .auth-shell { padding-right: 16px; padding-left: 16px; }
+  .auth-card { padding: 29px 23px 26px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

@@ -9,7 +9,7 @@ import { AuthService } from '../../../../core/services/auth.service';
   selector: 'app-login',
   imports: [ReactiveFormsModule, RouterLink],
   templateUrl: './login.html',
-  styleUrl: './login.css',
+  styleUrl: '../../auth-layout.css',
 })
 export class LoginComponent {
   private readonly formBuilder = inject(FormBuilder);
