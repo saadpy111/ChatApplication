@@ -14,6 +14,11 @@ describe('ChatComponent message receipts', () => {
   const statusUpdates = new Subject<PersistedMessage>();
   const unreadCountUpdates = new Subject<{ conversationId: number; unreadCount: number }>();
   const reconnected = new Subject<void>();
+  const userTyping = new Subject<{ conversationId: number; userId: string; displayName: string }>();
+  const userStoppedTyping = new Subject<{ conversationId: number; userId: string }>();
+  const connectionLost = new Subject<void>();
+  const startTyping = vi.fn();
+  const stopTyping = vi.fn();
   const sendMessage = vi.fn();
   const acknowledgeDelivered = vi.fn();
   const reconcilePendingDeliveries = vi.fn();
@@ -53,6 +58,8 @@ describe('ChatComponent message receipts', () => {
     sendMessage.mockReset();
     acknowledgeDelivered.mockReset();
     reconcilePendingDeliveries.mockReset();
+    startTyping.mockReset();
+    stopTyping.mockReset();
     await TestBed.configureTestingModule({
       imports: [ChatComponent],
       providers: [
@@ -67,10 +74,15 @@ describe('ChatComponent message receipts', () => {
             messageStatusUpdates$: statusUpdates.asObservable(),
             unreadCountUpdates$: unreadCountUpdates.asObservable(),
             reconnected$: reconnected.asObservable(),
+            userTyping$: userTyping.asObservable(),
+            userStoppedTyping$: userStoppedTyping.asObservable(),
+            connectionLost$: connectionLost.asObservable(),
             status: signal('connected'),
             error: signal(null),
             startConnection: vi.fn().mockResolvedValue(undefined),
             sendMessage,
+            startTyping,
+            stopTyping,
             acknowledgeDelivered,
             reconcilePendingDeliveries,
             acknowledgeRead: vi.fn(),
@@ -96,6 +108,7 @@ describe('ChatComponent message receipts', () => {
 
   afterEach(() => {
     fixture.destroy();
+    vi.useRealTimers();
   });
 
   it('deduplicates the broadcast and invocation result and keeps an early receipt update', async () => {
@@ -173,5 +186,43 @@ describe('ChatComponent message receipts', () => {
     unreadCountUpdates.next(update);
 
     expect(component.conversations()[0]?.unreadCount).toBe(3);
+  });
+
+  it('shows only the selected other participant and expires typing state', () => {
+    vi.useFakeTimers();
+    userTyping.next({ conversationId: 42, userId: 'user-b', displayName: 'bob' });
+    expect(component.typingUsername()).toBe('bob');
+
+    userTyping.next({ conversationId: 43, userId: 'user-b', displayName: 'bob' });
+    userTyping.next({ conversationId: 42, userId: 'user-a', displayName: 'alice' });
+    expect(component.typingUsername()).toBe('bob');
+
+    vi.advanceTimersByTime(5000);
+    expect(component.typingUsername()).toBeNull();
+  });
+
+  it('clears typing on stop, conversation switch, and connection loss', () => {
+    userTyping.next({ conversationId: 42, userId: 'user-b', displayName: 'bob' });
+    userStoppedTyping.next({ conversationId: 42, userId: 'user-b' });
+    expect(component.typingUsername()).toBeNull();
+
+    userTyping.next({ conversationId: 42, userId: 'user-b', displayName: 'bob' });
+    component.showConversationListOnMobile();
+    expect(component.typingUsername()).toBeNull();
+
+    component.selectedConversationId.set(42);
+    component.selectedFriend.set({ userId: 'user-b', username: 'bob' });
+    userTyping.next({ conversationId: 42, userId: 'user-b', displayName: 'bob' });
+    connectionLost.next();
+    expect(component.typingUsername()).toBeNull();
+  });
+
+  it('stops an active typing state when the chat page is destroyed', () => {
+    component.handleTypingStarted(42);
+    expect(startTyping).toHaveBeenCalledExactlyOnceWith(42);
+
+    fixture.destroy();
+
+    expect(stopTyping).toHaveBeenCalledExactlyOnceWith(42);
   });
 });

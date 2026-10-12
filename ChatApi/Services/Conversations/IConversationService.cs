@@ -7,6 +7,10 @@ public interface IConversationService
     Task<ConversationDto?> OpenAsync(string currentUserId, string otherUserId, CancellationToken cancellationToken);
     Task<IReadOnlyList<ConversationListItemDto>> GetConversationsAsync(string userId, CancellationToken cancellationToken);
     Task<int> GetUnreadCountAsync(long conversationId, string userId, CancellationToken cancellationToken);
+    Task<(string RecipientId, string SenderDisplayName)?> GetTypingTargetAsync(
+        long conversationId,
+        string userId,
+        CancellationToken cancellationToken);
     Task<MessagePageDto?> GetMessagesAsync(
         long conversationId,
         string userId,

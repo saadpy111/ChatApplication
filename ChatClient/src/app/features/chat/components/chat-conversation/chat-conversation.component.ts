@@ -37,7 +37,10 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   readonly sendResult = input<MessageSendResult | null>(null);
   readonly currentUserId = input<string | null>(null);
   readonly currentUsername = input('');
+  readonly typingUsername = input<string | null>(null);
   readonly messageSubmitted = output<MessageSendRequest>();
+  readonly typingStarted = output<number>();
+  readonly typingStopped = output<number>();
   readonly loadOlder = output<void>();
   readonly retryHistory = output<void>();
   readonly retryConnection = output<void>();
@@ -55,18 +58,29 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   private pendingSend: { requestId: number; conversationId: number; draft: string } | null = null;
   private pendingConversationFocus: { conversationId: number; origin: Element | null } | null = null;
   private focusAfterSend: { requestId: number; conversationId: number } | null = null;
+  private typingStopTimer: ReturnType<typeof setTimeout> | null = null;
+  private activeTypingConversationId: number | null = null;
+  private lastTypingNotificationAt = 0;
+  private readonly typingInactivityMs = 1800;
+  private readonly typingRefreshMs = 2500;
 
   constructor() {
     this.document.addEventListener('visibilitychange', this.handleDocumentVisibilityChange);
     this.destroyRef.onDestroy(() => {
       this.document.removeEventListener('visibilitychange', this.handleDocumentVisibilityChange);
       this.readObserver?.disconnect();
+      this.clearTypingStopTimer();
+      this.activeTypingConversationId = null;
     });
   }
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['friend'] || changes['conversationId'] || changes['conversationActive']) {
       const conversationId = this.conversationId();
+      if (!conversationId || !this.friend() || !this.conversationActive()
+        || (this.activeTypingConversationId !== null && this.activeTypingConversationId !== conversationId)) {
+        this.stopTyping();
+      }
       if (conversationId && this.friend() && this.conversationActive()) {
         this.pendingConversationFocus = { conversationId, origin: this.document.activeElement };
       } else {
@@ -85,6 +99,9 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
     const pendingSend = this.pendingSend;
     if (result && pendingSend && result.requestId === pendingSend.requestId) {
       this.pendingSend = null;
+      if (result.succeeded) {
+        this.stopTyping();
+      }
       if (result.conversationId === pendingSend.conversationId && this.conversationId() === pendingSend.conversationId) {
         if (!result.succeeded) {
           this.draft = pendingSend.draft;
@@ -158,11 +175,47 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
     this.messageSubmitted.emit({ requestId, conversationId, text: message });
   }
 
+  handleDraftInput(): void {
+    const conversationId = this.conversationId();
+    if (!this.draft.trim() || !conversationId || !this.conversationActive()) {
+      this.stopTyping();
+      return;
+    }
+
+    const now = Date.now();
+    if (this.activeTypingConversationId !== conversationId
+      || now - this.lastTypingNotificationAt >= this.typingRefreshMs) {
+      this.activeTypingConversationId = conversationId;
+      this.lastTypingNotificationAt = now;
+      this.typingStarted.emit(conversationId);
+    }
+
+    this.clearTypingStopTimer();
+    this.typingStopTimer = setTimeout(() => this.stopTyping(), this.typingInactivityMs);
+  }
+
   handleEnter(event: Event): void {
     const keyboardEvent = event as KeyboardEvent;
     if (!keyboardEvent.shiftKey) {
       keyboardEvent.preventDefault();
       this.send();
+    }
+  }
+
+  private stopTyping(): void {
+    this.clearTypingStopTimer();
+    const conversationId = this.activeTypingConversationId;
+    this.activeTypingConversationId = null;
+    this.lastTypingNotificationAt = 0;
+    if (conversationId !== null) {
+      this.typingStopped.emit(conversationId);
+    }
+  }
+
+  private clearTypingStopTimer(): void {
+    if (this.typingStopTimer !== null) {
+      clearTimeout(this.typingStopTimer);
+      this.typingStopTimer = null;
     }
   }
 

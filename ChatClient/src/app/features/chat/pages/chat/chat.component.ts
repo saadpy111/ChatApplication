@@ -6,7 +6,7 @@ import { ConversationSummary, MessagePage, PersistedMessage, UnreadCountUpdate }
 import { ChatConversationComponent } from '../../components/chat-conversation/chat-conversation.component';
 import { ChatSidebarComponent } from '../../components/chat-sidebar/chat-sidebar.component';
 import { User } from '../../../users/models/user';
-import { ChatService } from '../../services/chatService';
+import { ChatService, UserStoppedTypingEvent, UserTypingEvent } from '../../services/chatService';
 import { ConversationsApiService } from '../../services/conversations-api.service';
 import { AuthService } from '../../../../core/services/auth.service';
 
@@ -27,6 +27,7 @@ export class ChatComponent implements OnInit {
   readonly messages = signal<ChatMessage[]>([]);
   readonly sending = signal(false);
   readonly sendResult = signal<MessageSendResult | null>(null);
+  readonly typingUsername = signal<string | null>(null);
   readonly conversationsLoading = signal(true);
   readonly conversationsError = signal<string | null>(null);
   readonly initialLoading = signal(false);
@@ -42,6 +43,9 @@ export class ChatComponent implements OnInit {
   private readonly pendingStatusUpdates = new Map<number, PersistedMessage>();
   private readonly pendingUnreadCountUpdates = new Map<number, { unreadCount: number; version: number }>();
   private unreadCountVersion = 0;
+  private typingIndicatorTimeout: ReturnType<typeof setTimeout> | null = null;
+  private readonly typingIndicatorTimeoutMs = 5000;
+  private activeTypingConversationId: number | null = null;
 
   ngOnInit(): void {
     this.chatService.incomingMessages$
@@ -56,6 +60,22 @@ export class ChatComponent implements OnInit {
     this.chatService.reconnected$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => void this.reconcileAfterReconnect());
+    this.chatService.userTyping$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((event) => this.receiveTypingStarted(event));
+    this.chatService.userStoppedTyping$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((event) => this.receiveTypingStopped(event));
+    this.chatService.connectionLost$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.clearTypingIndicator());
+    this.destroyRef.onDestroy(() => {
+      this.clearTypingIndicator();
+      if (this.activeTypingConversationId !== null) {
+        this.chatService.stopTyping(this.activeTypingConversationId);
+        this.activeTypingConversationId = null;
+      }
+    });
 
     void this.loadConversations();
     void this.connect();
@@ -70,6 +90,7 @@ export class ChatComponent implements OnInit {
   }
 
   async openConversation(friend: User): Promise<void> {
+    this.clearTypingIndicator();
     this.showConversationOnMobile.set(true);
     this.selectedConversationId.set(null);
     this.selectedFriend.set(friend);
@@ -98,7 +119,20 @@ export class ChatComponent implements OnInit {
   }
 
   showConversationListOnMobile(): void {
+    this.clearTypingIndicator();
     this.showConversationOnMobile.set(false);
+  }
+
+  handleTypingStarted(conversationId: number): void {
+    this.activeTypingConversationId = conversationId;
+    this.chatService.startTyping(conversationId);
+  }
+
+  handleTypingStopped(conversationId: number): void {
+    if (this.activeTypingConversationId === conversationId) {
+      this.activeTypingConversationId = null;
+    }
+    this.chatService.stopTyping(conversationId);
   }
 
   retryCurrentConversation(): void {
@@ -169,6 +203,7 @@ export class ChatComponent implements OnInit {
   }
 
   private async activateConversation(conversationId: number, friend: User): Promise<void> {
+    this.clearTypingIndicator();
     const loadVersion = ++this.conversationLoadVersion;
     this.showConversationOnMobile.set(true);
     this.selectedConversationId.set(conversationId);
@@ -319,6 +354,42 @@ export class ChatComponent implements OnInit {
         ? { ...item, unreadCount: update.unreadCount }
         : item,
     ));
+  }
+
+  private receiveTypingStarted(event: UserTypingEvent): void {
+    const conversationId = this.selectedConversationId();
+    const friend = this.selectedFriend();
+    const currentUserId = this.authService.currentUser()?.userId;
+    if (event.conversationId !== conversationId || !friend
+      || event.userId !== friend.userId || event.userId === currentUserId) {
+      return;
+    }
+
+    this.typingUsername.set(event.displayName);
+    this.clearTypingIndicatorTimeout();
+    this.typingIndicatorTimeout = setTimeout(
+      () => this.clearTypingIndicator(),
+      this.typingIndicatorTimeoutMs,
+    );
+  }
+
+  private receiveTypingStopped(event: UserStoppedTypingEvent): void {
+    const friend = this.selectedFriend();
+    if (event.conversationId === this.selectedConversationId() && friend?.userId === event.userId) {
+      this.clearTypingIndicator();
+    }
+  }
+
+  private clearTypingIndicator(): void {
+    this.clearTypingIndicatorTimeout();
+    this.typingUsername.set(null);
+  }
+
+  private clearTypingIndicatorTimeout(): void {
+    if (this.typingIndicatorTimeout !== null) {
+      clearTimeout(this.typingIndicatorTimeout);
+      this.typingIndicatorTimeout = null;
+    }
   }
 
   private async reconcileAfterReconnect(): Promise<void> {

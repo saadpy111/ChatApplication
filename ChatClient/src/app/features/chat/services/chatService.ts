@@ -12,6 +12,9 @@ export class ChatService {
   private readonly messageStatusUpdatesSubject = new Subject<PersistedMessage>();
   private readonly unreadCountUpdatesSubject = new Subject<UnreadCountUpdate>();
   private readonly reconnectedSubject = new Subject<void>();
+  private readonly userTypingSubject = new Subject<UserTypingEvent>();
+  private readonly userStoppedTypingSubject = new Subject<UserStoppedTypingEvent>();
+  private readonly connectionLostSubject = new Subject<void>();
   private readonly pendingAcknowledgements = new Map<string, { method: string; args: unknown[] }>();
   private readonly acknowledgementAttempts = new Map<string, Promise<void>>();
   private readonly completedAcknowledgements = new Set<string>();
@@ -24,6 +27,9 @@ export class ChatService {
   readonly messageStatusUpdates$ = this.messageStatusUpdatesSubject.asObservable();
   readonly unreadCountUpdates$ = this.unreadCountUpdatesSubject.asObservable();
   readonly reconnected$ = this.reconnectedSubject.asObservable();
+  readonly userTyping$ = this.userTypingSubject.asObservable();
+  readonly userStoppedTyping$ = this.userStoppedTypingSubject.asObservable();
+  readonly connectionLost$ = this.connectionLostSubject.asObservable();
   readonly status = signal<ChatConnectionStatus>('disconnected');
   readonly error = signal<string | null>(null);
 
@@ -69,6 +75,14 @@ export class ChatService {
     }
 
     return connection.invoke<PersistedMessage>('SendMessage', conversationId, message);
+  }
+
+  startTyping(conversationId: number): void {
+    this.invokeTypingMethod('TypingStarted', conversationId);
+  }
+
+  stopTyping(conversationId: number): void {
+    this.invokeTypingMethod('TypingStopped', conversationId);
   }
 
   acknowledgeDelivered(messageId: number): void {
@@ -189,7 +203,20 @@ export class ChatService {
         this.unreadCountUpdatesSubject.next(payload);
       }
     });
-    connection.onreconnecting(() => this.status.set('reconnecting'));
+    connection.on('UserTyping', (payload: unknown) => {
+      if (isUserTypingEvent(payload)) {
+        this.userTypingSubject.next(payload);
+      }
+    });
+    connection.on('UserStoppedTyping', (payload: unknown) => {
+      if (isUserStoppedTypingEvent(payload)) {
+        this.userStoppedTypingSubject.next(payload);
+      }
+    });
+    connection.onreconnecting(() => {
+      this.status.set('reconnecting');
+      this.connectionLostSubject.next();
+    });
     connection.onreconnected(() => {
       this.error.set(null);
       this.status.set('connected');
@@ -197,11 +224,34 @@ export class ChatService {
       this.processPendingDeliveryReconciliation();
       this.reconnectedSubject.next();
     });
-    connection.onclose(() => this.status.set('disconnected'));
+    connection.onclose(() => {
+      this.status.set('disconnected');
+      this.connectionLostSubject.next();
+    });
 
     this.hubConnection = connection;
     return connection;
   }
+
+  private invokeTypingMethod(method: 'TypingStarted' | 'TypingStopped', conversationId: number): void {
+    const connection = this.hubConnection;
+    if (!connection || connection.state !== HubConnectionState.Connected) {
+      return;
+    }
+
+    void connection.invoke(method, conversationId).catch(() => undefined);
+  }
+}
+
+export interface UserTypingEvent {
+  conversationId: number;
+  userId: string;
+  displayName: string;
+}
+
+export interface UserStoppedTypingEvent {
+  conversationId: number;
+  userId: string;
 }
 
 function isPersistedMessage(payload: unknown): payload is PersistedMessage {
@@ -227,4 +277,31 @@ function isUnreadCountUpdate(payload: unknown): payload is UnreadCountUpdate {
   const update = payload as Partial<UnreadCountUpdate>;
   return Number.isSafeInteger(update.conversationId) && Number(update.conversationId) > 0
     && Number.isSafeInteger(update.unreadCount) && Number(update.unreadCount) >= 0;
+}
+
+function isUserTypingEvent(payload: unknown): payload is UserTypingEvent {
+  if (!isRecord(payload)) {
+    return false;
+  }
+
+  return isConversationId(payload['conversationId'])
+    && typeof payload['userId'] === 'string' && payload['userId'].length > 0
+    && typeof payload['displayName'] === 'string' && payload['displayName'].length > 0;
+}
+
+function isUserStoppedTypingEvent(payload: unknown): payload is UserStoppedTypingEvent {
+  if (!isRecord(payload)) {
+    return false;
+  }
+
+  return isConversationId(payload['conversationId'])
+    && typeof payload['userId'] === 'string' && payload['userId'].length > 0;
+}
+
+function isConversationId(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
