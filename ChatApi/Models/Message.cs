@@ -9,6 +9,8 @@ public class Message
     public required string SenderId { get; set; }
     public required string Content { get; set; }
     public DateTime CreatedAt { get; set; }
+    public DateTime? DeliveredAt { get; set; }
+    public DateTime? ReadAt { get; set; }
     public Conversation Conversation { get; set; } = null!;
     public ApplicationUser Sender { get; set; } = null!;
 }

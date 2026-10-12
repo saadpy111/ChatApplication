@@ -106,6 +106,175 @@ public sealed class ConversationServiceTests : IAsyncLifetime
         Assert.Equal("user-a", stored.SenderId);
         Assert.Equal("hello", stored.Content);
         Assert.Equal("user-b", sent.Value.RecipientId);
+        Assert.Null(stored.DeliveredAt);
+        Assert.Null(stored.ReadAt);
+    }
+
+    [Fact]
+    public async Task DeliveryAcknowledgementIsRecipientOnlyAndIdempotent()
+    {
+        var conversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
+        Assert.NotNull(conversation);
+        var sent = await _service.SendMessageAsync(
+            conversation.ConversationId, "user-a", "hello", CancellationToken.None);
+        Assert.NotNull(sent);
+
+        var deniedSender = await _service.MarkMessageAsDeliveredAsync(
+            sent.Value.Message.Id, "user-a", CancellationToken.None);
+        var deniedOutsider = await _service.MarkMessageAsDeliveredAsync(
+            sent.Value.Message.Id, "user-c", CancellationToken.None);
+        var delivered = await _service.MarkMessageAsDeliveredAsync(
+            sent.Value.Message.Id, "user-b", CancellationToken.None);
+        var deliveredAgain = await _service.MarkMessageAsDeliveredAsync(
+            sent.Value.Message.Id, "user-b", CancellationToken.None);
+
+        Assert.Null(deniedSender);
+        Assert.Null(deniedOutsider);
+        Assert.NotNull(delivered);
+        Assert.NotNull(delivered.Value.Message.DeliveredAt);
+        Assert.Null(delivered.Value.Message.ReadAt);
+        Assert.Equal(delivered.Value.Message.DeliveredAt, deliveredAgain!.Value.Message.DeliveredAt);
+        Assert.Equal(delivered.Value.Message.DeliveredAt, (await _dbContext.Messages.SingleAsync()).DeliveredAt);
+    }
+
+    [Fact]
+    public async Task PendingDeliveryReconciliationMarksAllIncomingMessagesAcrossConversations()
+    {
+        var firstConversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
+        var secondConversation = await _service.OpenAsync("user-a", "user-c", CancellationToken.None);
+        Assert.NotNull(firstConversation);
+        Assert.NotNull(secondConversation);
+
+        var olderPending = new Message
+        {
+            ConversationId = firstConversation.ConversationId,
+            SenderId = "user-b",
+            Content = "older pending",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-3)
+        };
+        var newerDelivered = new Message
+        {
+            ConversationId = firstConversation.ConversationId,
+            SenderId = "user-b",
+            Content = "newer already delivered",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-2),
+            DeliveredAt = DateTime.UtcNow.AddMinutes(-1)
+        };
+        var alreadyReadAt = DateTime.UtcNow.AddMinutes(-1);
+        var alreadyRead = new Message
+        {
+            ConversationId = firstConversation.ConversationId,
+            SenderId = "user-b",
+            Content = "already read",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-1),
+            DeliveredAt = alreadyReadAt.AddMinutes(-1),
+            ReadAt = alreadyReadAt
+        };
+        var secondConversationPending = new Message
+        {
+            ConversationId = secondConversation.ConversationId,
+            SenderId = "user-c",
+            Content = "second conversation pending",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-1)
+        };
+        var outgoing = new Message
+        {
+            ConversationId = firstConversation.ConversationId,
+            SenderId = "user-a",
+            Content = "outgoing",
+            CreatedAt = DateTime.UtcNow
+        };
+        _dbContext.Messages.AddRange(olderPending, newerDelivered, alreadyRead, secondConversationPending, outgoing);
+        await _dbContext.SaveChangesAsync();
+
+        var receipts = await _service.ReconcilePendingDeliveriesAsync("user-a", CancellationToken.None);
+        var repeatedReceipts = await _service.ReconcilePendingDeliveriesAsync("user-a", CancellationToken.None);
+
+        Assert.Equal(new[] { olderPending.Id, secondConversationPending.Id }, receipts.Select(item => item.Message.Id));
+        Assert.Equal(new[] { "user-b", "user-c" }, receipts.Select(item => item.SenderId));
+        Assert.All(receipts, receipt => Assert.NotNull(receipt.Message.DeliveredAt));
+        Assert.All(receipts, receipt => Assert.Null(receipt.Message.ReadAt));
+        Assert.Empty(repeatedReceipts);
+        Assert.NotNull(newerDelivered.DeliveredAt);
+        Assert.Equal(alreadyReadAt, alreadyRead.ReadAt);
+        Assert.Null(outgoing.DeliveredAt);
+    }
+
+    [Fact]
+    public async Task ReadAcknowledgementMarksOnlyIncomingMessagesThroughOrderedBoundary()
+    {
+        var conversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
+        var unrelatedConversation = await _service.OpenAsync("user-a", "user-c", CancellationToken.None);
+        Assert.NotNull(conversation);
+        Assert.NotNull(unrelatedConversation);
+        var timestamp = new DateTime(2026, 10, 11, 12, 0, 0, DateTimeKind.Utc);
+        var incomingBefore = new Message
+        {
+            ConversationId = conversation.ConversationId,
+            SenderId = "user-a",
+            Content = "incoming before",
+            CreatedAt = timestamp
+        };
+        var outgoingBoundary = new Message
+        {
+            ConversationId = conversation.ConversationId,
+            SenderId = "user-b",
+            Content = "my message",
+            CreatedAt = timestamp.AddMinutes(1)
+        };
+        var incomingAfter = new Message
+        {
+            ConversationId = conversation.ConversationId,
+            SenderId = "user-a",
+            Content = "incoming after",
+            CreatedAt = timestamp.AddMinutes(2)
+        };
+        var unrelatedIncoming = new Message
+        {
+            ConversationId = unrelatedConversation.ConversationId,
+            SenderId = "user-a",
+            Content = "unrelated",
+            CreatedAt = timestamp
+        };
+        _dbContext.Messages.AddRange(incomingBefore, outgoingBoundary, incomingAfter, unrelatedIncoming);
+        await _dbContext.SaveChangesAsync();
+
+        var marked = await _service.MarkMessagesAsReadAsync(
+            conversation.ConversationId, outgoingBoundary.Id, "user-b", CancellationToken.None);
+        var markedAgain = await _service.MarkMessagesAsReadAsync(
+            conversation.ConversationId, outgoingBoundary.Id, "user-b", CancellationToken.None);
+        var denied = await _service.MarkMessagesAsReadAsync(
+            unrelatedConversation.ConversationId, incomingBefore.Id, "user-b", CancellationToken.None);
+
+        Assert.NotNull(marked);
+        var receipt = Assert.Single(marked);
+        Assert.Equal(incomingBefore.Id, receipt.Message.Id);
+        Assert.NotNull(receipt.Message.DeliveredAt);
+        Assert.NotNull(receipt.Message.ReadAt);
+        Assert.Empty(markedAgain!);
+        Assert.Null(denied);
+        Assert.Null(incomingAfter.ReadAt);
+        Assert.Null(outgoingBoundary.ReadAt);
+        Assert.Null(unrelatedIncoming.ReadAt);
+    }
+
+    [Fact]
+    public async Task MessageHistoryIncludesPersistedReceiptTimestamps()
+    {
+        var conversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
+        Assert.NotNull(conversation);
+        var sent = await _service.SendMessageAsync(
+            conversation.ConversationId, "user-a", "hello", CancellationToken.None);
+        Assert.NotNull(sent);
+        await _service.MarkMessageAsDeliveredAsync(
+            sent.Value.Message.Id, "user-b", CancellationToken.None);
+
+        var page = await _service.GetMessagesAsync(
+            conversation.ConversationId, "user-a", 30, null, CancellationToken.None);
+
+        var message = Assert.Single(page!.Messages);
+        Assert.NotNull(message.DeliveredAt);
+        Assert.Null(message.ReadAt);
     }
 
     [Fact]

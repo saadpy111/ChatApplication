@@ -20,6 +20,8 @@ export interface PersistedMessage {
   senderId: string;
   content: string;
   createdAt: string;
+  deliveredAt: string | null;
+  readAt: string | null;
 }
 
 export interface MessagePage {

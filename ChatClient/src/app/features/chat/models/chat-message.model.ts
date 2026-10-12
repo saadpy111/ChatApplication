@@ -3,6 +3,8 @@ export interface ChatMessage {
   text: string;
   senderId: string;
   sentAt: Date;
+  deliveredAt?: string | null;
+  readAt?: string | null;
 }
 
 export type ChatConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';

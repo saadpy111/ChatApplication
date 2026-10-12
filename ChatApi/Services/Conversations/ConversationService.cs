@@ -170,7 +170,9 @@ public class ConversationService : IConversationService
                 message.ConversationId,
                 message.SenderId,
                 message.Content,
-                message.CreatedAt
+                message.CreatedAt,
+                message.DeliveredAt,
+                message.ReadAt
             })
             .ToListAsync(cancellationToken);
 
@@ -186,7 +188,13 @@ public class ConversationService : IConversationService
             ConversationId = message.ConversationId,
             SenderId = message.SenderId,
             Content = message.Content,
-            CreatedAt = DateTime.SpecifyKind(message.CreatedAt, DateTimeKind.Utc)
+            CreatedAt = DateTime.SpecifyKind(message.CreatedAt, DateTimeKind.Utc),
+            DeliveredAt = message.DeliveredAt is null
+                ? null
+                : DateTime.SpecifyKind(message.DeliveredAt.Value, DateTimeKind.Utc),
+            ReadAt = message.ReadAt is null
+                ? null
+                : DateTime.SpecifyKind(message.ReadAt.Value, DateTimeKind.Utc)
         }).ToList();
         messages.Reverse();
         return new MessagePageDto
@@ -228,9 +236,117 @@ public class ConversationService : IConversationService
             ConversationId = message.ConversationId,
             SenderId = message.SenderId,
             Content = message.Content,
-            CreatedAt = message.CreatedAt
+            CreatedAt = message.CreatedAt,
+            DeliveredAt = message.DeliveredAt,
+            ReadAt = message.ReadAt
         }, conversation.User1Id == senderId ? conversation.User2Id : conversation.User1Id);
     }
+
+    public async Task<(MessageDto Message, string SenderId)?> MarkMessageAsDeliveredAsync(
+        long messageId,
+        string recipientId,
+        CancellationToken cancellationToken)
+    {
+        var message = await _dbContext.Messages
+            .Include(item => item.Conversation)
+            .SingleOrDefaultAsync(item => item.Id == messageId && item.SenderId != recipientId &&
+                (item.Conversation.User1Id == recipientId || item.Conversation.User2Id == recipientId),
+                cancellationToken);
+        if (message is null)
+        {
+            return null;
+        }
+
+        message.DeliveredAt ??= DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return (ToMessageDto(message), message.SenderId);
+    }
+
+    public async Task<IReadOnlyList<(MessageDto Message, string SenderId)>> ReconcilePendingDeliveriesAsync(
+        string recipientId,
+        CancellationToken cancellationToken)
+    {
+        var pendingMessages = await _dbContext.Messages
+            .Include(message => message.Conversation)
+            .Where(message => message.DeliveredAt == null && message.SenderId != recipientId &&
+                ((message.Conversation.User1Id == recipientId && message.Conversation.User2Id == message.SenderId) ||
+                    (message.Conversation.User2Id == recipientId && message.Conversation.User1Id == message.SenderId)))
+            .OrderBy(message => message.CreatedAt)
+            .ThenBy(message => message.Id)
+            .ToListAsync(cancellationToken);
+        if (pendingMessages.Count == 0)
+        {
+            return [];
+        }
+
+        var deliveredAt = DateTime.UtcNow;
+        foreach (var message in pendingMessages)
+        {
+            message.DeliveredAt ??= deliveredAt;
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return pendingMessages
+            .Select(message => (ToMessageDto(message), message.SenderId))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<(MessageDto Message, string SenderId)>?> MarkMessagesAsReadAsync(
+        long conversationId,
+        long lastReadMessageId,
+        string readerId,
+        CancellationToken cancellationToken)
+    {
+        var boundary = await _dbContext.Messages
+            .Where(message => message.Id == lastReadMessageId && message.ConversationId == conversationId)
+            .Select(message => new { message.CreatedAt })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (boundary is null || !await _dbContext.Conversations.AnyAsync(conversation =>
+                conversation.Id == conversationId &&
+                (conversation.User1Id == readerId || conversation.User2Id == readerId),
+                cancellationToken))
+        {
+            return null;
+        }
+
+        var unreadMessages = await _dbContext.Messages
+            .Where(message => message.ConversationId == conversationId && message.SenderId != readerId &&
+                (message.CreatedAt < boundary.CreatedAt ||
+                    (message.CreatedAt == boundary.CreatedAt && message.Id <= lastReadMessageId)) &&
+                message.ReadAt == null)
+            .ToListAsync(cancellationToken);
+        if (unreadMessages.Count == 0)
+        {
+            return [];
+        }
+
+        var readAt = DateTime.UtcNow;
+        foreach (var message in unreadMessages)
+        {
+            message.DeliveredAt ??= readAt;
+            message.ReadAt = readAt;
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return unreadMessages
+            .Select(message => (ToMessageDto(message), message.SenderId))
+            .ToList();
+    }
+
+    private static MessageDto ToMessageDto(Message message) => new()
+    {
+        Id = message.Id,
+        ConversationId = message.ConversationId,
+        SenderId = message.SenderId,
+        Content = message.Content,
+        CreatedAt = DateTime.SpecifyKind(message.CreatedAt, DateTimeKind.Utc),
+        DeliveredAt = message.DeliveredAt is null
+            ? null
+            : DateTime.SpecifyKind(message.DeliveredAt.Value, DateTimeKind.Utc),
+        ReadAt = message.ReadAt is null
+            ? null
+            : DateTime.SpecifyKind(message.ReadAt.Value, DateTimeKind.Utc)
+    };
 
     private Task<Conversation?> FindConversationAsync(
         string user1Id,

@@ -39,11 +39,15 @@ export class ChatComponent implements OnInit {
   private nextCursor: string | null = null;
   private conversationLoadVersion = 0;
   private conversationsLoadVersion = 0;
+  private readonly pendingStatusUpdates = new Map<number, PersistedMessage>();
 
   ngOnInit(): void {
     this.chatService.incomingMessages$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((message) => this.receiveMessage(message));
+    this.chatService.messageStatusUpdates$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((message) => this.updateMessageStatus(message));
     this.chatService.reconnected$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => void this.reconcileAfterReconnect());
@@ -121,6 +125,7 @@ export class ChatComponent implements OnInit {
       }
 
       this.messages.update((current) => this.mergeMessages(current, page.messages));
+      this.acknowledgeUndeliveredMessages(page.messages);
       this.nextCursor = page.nextCursor;
       this.hasMore.set(page.hasMore);
       this.olderPageVersion.update((version) => version + 1);
@@ -177,6 +182,7 @@ export class ChatComponent implements OnInit {
       }
 
       this.messages.set(page.messages.map((message) => this.toChatMessage(message, friend)));
+      this.acknowledgeUndeliveredMessages(page.messages);
       this.nextCursor = page.nextCursor;
       this.hasMore.set(page.hasMore);
     } catch {
@@ -198,6 +204,7 @@ export class ChatComponent implements OnInit {
       const conversations = await firstValueFrom(this.conversationsApi.getConversations());
       if (this.conversationsLoadVersion === loadVersion) {
         this.conversations.set(conversations);
+        this.chatService.reconcilePendingDeliveries();
       }
     } catch {
       if (this.conversationsLoadVersion === loadVersion) {
@@ -213,11 +220,52 @@ export class ChatComponent implements OnInit {
   private receiveMessage(message: PersistedMessage): void {
     this.updateSidebar(message);
     const friend = this.selectedFriend();
-    if (this.selectedConversationId() !== message.conversationId || !friend) {
+    if (this.selectedConversationId() === message.conversationId && friend) {
+      this.messages.update((current) => this.mergeMessages(current, [message], friend));
+    }
+
+    const currentUserId = this.authService.currentUser()?.userId;
+    if (currentUserId && message.senderId !== currentUserId) {
+      this.chatService.acknowledgeDelivered(message.id);
+    }
+  }
+
+  private updateMessageStatus(message: PersistedMessage): void {
+    if (this.selectedConversationId() !== message.conversationId) {
       return;
     }
 
-    this.messages.update((current) => this.mergeMessages(current, [message], friend));
+    if (!this.messages().some((item) => item.id === message.id)) {
+      const currentUserId = this.authService.currentUser()?.userId;
+      if (message.senderId === currentUserId && Date.now() - Date.parse(message.createdAt) < 60_000) {
+        this.pendingStatusUpdates.set(message.id, message);
+      }
+      return;
+    }
+
+    this.messages.update((current) => this.mergeMessages(current, [message]));
+  }
+
+  acknowledgeRead(acknowledgement: { conversationId: number; lastReadMessageId: number }): void {
+    if (this.selectedConversationId() === acknowledgement.conversationId) {
+      this.chatService.acknowledgeRead(
+        acknowledgement.conversationId,
+        acknowledgement.lastReadMessageId,
+      );
+    }
+  }
+
+  private acknowledgeUndeliveredMessages(messages: PersistedMessage[]): void {
+    const currentUserId = this.authService.currentUser()?.userId;
+    if (!currentUserId) {
+      return;
+    }
+
+    for (const message of messages) {
+      if (message.senderId !== currentUserId && !message.deliveredAt) {
+        this.chatService.acknowledgeDelivered(message.id);
+      }
+    }
   }
 
   private updateSidebar(message: PersistedMessage): void {
@@ -254,6 +302,7 @@ export class ChatComponent implements OnInit {
       const page = await firstValueFrom(this.conversationsApi.getMessages(conversationId));
       if (this.selectedConversationId() === conversationId) {
         this.messages.update((current) => this.mergeMessages(current, page.messages, friend));
+        this.acknowledgeUndeliveredMessages(page.messages);
       }
     } catch {
       this.historyError.set('Could not sync recent messages after reconnecting.');
@@ -288,8 +337,16 @@ export class ChatComponent implements OnInit {
     }
 
     const byId = new Map(current.map((message) => [message.id, message]));
-    for (const message of incoming) {
-      byId.set(message.id, this.toChatMessage(message, friend));
+    for (const received of incoming) {
+      const message = this.pendingStatusUpdates.get(received.id) ?? received;
+      this.pendingStatusUpdates.delete(received.id);
+      const converted = this.toChatMessage(message, friend);
+      const existing = byId.get(message.id);
+      byId.set(message.id, {
+        ...converted,
+        deliveredAt: converted.deliveredAt ?? received.deliveredAt ?? existing?.deliveredAt ?? null,
+        readAt: converted.readAt ?? received.readAt ?? existing?.readAt ?? null,
+      });
     }
 
     return [...byId.values()].sort((left, right) =>
@@ -303,6 +360,8 @@ export class ChatComponent implements OnInit {
       text: message.content,
       senderId: message.senderId,
       sentAt: new Date(message.createdAt),
+      deliveredAt: message.deliveredAt,
+      readAt: message.readAt,
     };
   }
 }

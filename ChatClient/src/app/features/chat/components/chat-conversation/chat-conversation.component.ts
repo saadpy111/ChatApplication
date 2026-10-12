@@ -14,6 +14,10 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   private readonly destroyRef = inject(DestroyRef);
   private readonly document = inject(DOCUMENT);
   private readonly injector = inject(Injector);
+  private readObserver: IntersectionObserver | null = null;
+  private readonly observedMessages = new Set<Element>();
+  private readonly visibleIncomingMessageIds = new Set<number>();
+  private lastReadBoundary: { id: number; sentAt: number } | null = null;
   @ViewChild('messageList') private messageList?: ElementRef<HTMLElement>;
   @ViewChild('messageInput') private messageInput?: ElementRef<HTMLTextAreaElement>;
   @ViewChild('sendButton') private sendButton?: ElementRef<HTMLButtonElement>;
@@ -38,6 +42,7 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   readonly retryHistory = output<void>();
   readonly retryConnection = output<void>();
   readonly backToList = output<void>();
+  readonly readAcknowledged = output<{ conversationId: number; lastReadMessageId: number }>();
 
   draft = '';
   private previousMessageCount = 0;
@@ -51,6 +56,14 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   private pendingConversationFocus: { conversationId: number; origin: Element | null } | null = null;
   private focusAfterSend: { requestId: number; conversationId: number } | null = null;
 
+  constructor() {
+    this.document.addEventListener('visibilitychange', this.handleDocumentVisibilityChange);
+    this.destroyRef.onDestroy(() => {
+      this.document.removeEventListener('visibilitychange', this.handleDocumentVisibilityChange);
+      this.readObserver?.disconnect();
+    });
+  }
+
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['friend'] || changes['conversationId'] || changes['conversationActive']) {
       const conversationId = this.conversationId();
@@ -59,6 +72,13 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
       } else {
         this.pendingConversationFocus = null;
       }
+    }
+    if (changes['conversationId']) {
+      this.readObserver?.disconnect();
+      this.readObserver = null;
+      this.observedMessages.clear();
+      this.visibleIncomingMessageIds.clear();
+      this.lastReadBoundary = null;
     }
 
     const result = this.sendResult();
@@ -101,6 +121,7 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
         this.preserveScroll = false;
       }
       this.previousMessageCount = messages.length;
+      this.refreshReadTracking(element);
       return;
     }
 
@@ -110,6 +131,7 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
       }
       this.previousMessageCount = messages.length;
     }
+    this.refreshReadTracking(element);
   }
 
   handleScroll(event: Event): void {
@@ -171,6 +193,78 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
 
     this.pendingConversationFocus = null;
     textarea.focus({ preventScroll: true });
+  }
+
+  private readonly handleDocumentVisibilityChange = (): void => {
+    this.readObserver?.disconnect();
+    this.readObserver = null;
+    this.observedMessages.clear();
+    this.refreshReadTracking(this.messageList?.nativeElement);
+  };
+
+  private refreshReadTracking(element: HTMLElement | undefined): void {
+    if (!element || !this.conversationId() || this.document.visibilityState !== 'visible'
+      || element.getClientRects().length === 0 || typeof IntersectionObserver === 'undefined') {
+      this.readObserver?.disconnect();
+      this.readObserver = null;
+      this.observedMessages.clear();
+      return;
+    }
+
+    if (!this.readObserver) {
+      const observedConversationId = this.conversationId();
+      this.readObserver = new IntersectionObserver((entries) => {
+        if (this.conversationId() !== observedConversationId) {
+          return;
+        }
+
+        for (const entry of entries) {
+          const target = entry.target as HTMLElement;
+          const messageId = Number(target.dataset['messageId']);
+          if (entry.isIntersecting && entry.intersectionRatio > 0
+            && target.dataset['incoming'] === 'true' && Number.isSafeInteger(messageId)) {
+            this.visibleIncomingMessageIds.add(messageId);
+          }
+        }
+        this.acknowledgeLatestVisibleMessage();
+      }, { root: element, threshold: 0 });
+    }
+
+    for (const target of element.querySelectorAll<HTMLElement>('.message[data-message-id]')) {
+      if (!this.observedMessages.has(target)) {
+        this.observedMessages.add(target);
+        this.readObserver.observe(target);
+      }
+    }
+  }
+
+  private acknowledgeLatestVisibleMessage(): void {
+    const conversationId = this.conversationId();
+    if (!conversationId || this.document.visibilityState !== 'visible') {
+      return;
+    }
+
+    let latestVisible: ChatMessage | undefined;
+    for (const message of this.messages()) {
+      if (message.senderId !== this.currentUserId() && this.visibleIncomingMessageIds.has(message.id)
+        && (!latestVisible || message.sentAt.getTime() > latestVisible.sentAt.getTime()
+          || (message.sentAt.getTime() === latestVisible.sentAt.getTime() && message.id > latestVisible.id))) {
+        latestVisible = message;
+      }
+    }
+
+    if (!latestVisible) {
+      return;
+    }
+
+    const sentAt = latestVisible.sentAt.getTime();
+    const previous = this.lastReadBoundary;
+    if (previous && (sentAt < previous.sentAt || (sentAt === previous.sentAt && latestVisible.id <= previous.id))) {
+      return;
+    }
+
+    this.lastReadBoundary = { id: latestVisible.id, sentAt };
+    this.readAcknowledged.emit({ conversationId, lastReadMessageId: latestVisible.id });
   }
 
   private restoreComposerFocusAfterRender(): void {

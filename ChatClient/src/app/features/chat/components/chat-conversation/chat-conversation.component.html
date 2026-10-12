@@ -61,7 +61,7 @@
           </p>
         }
         @for (message of messages(); track message.id) {
-          <article class="message" [class.own-message]="message.senderId === currentUserId()">
+          <article class="message" [class.own-message]="message.senderId === currentUserId()" [attr.data-message-id]="message.id" [attr.data-incoming]="message.senderId !== currentUserId()">
             <div class="message-avatar" aria-hidden="true">{{ message.senderId === currentUserId() ? (currentUsername().charAt(0).toUpperCase() || '?') : (friend()?.username?.charAt(0)?.toUpperCase() || '?') }}</div>
             <div class="message-body">
               <div class="message-meta">
@@ -69,6 +69,15 @@
                 <time>{{ message.sentAt | date:'shortTime' }}</time>
               </div>
               <p dir="auto">{{ message.text }}</p>
+              @if (message.senderId === currentUserId()) {
+                <span
+                  class="message-status"
+                  [class.read-receipt]="!!message.readAt"
+                  role="img"
+                  [attr.aria-label]="message.readAt ? 'Read' : message.deliveredAt ? 'Delivered' : 'Sent'"
+                  [title]="message.readAt ? 'Read' : message.deliveredAt ? 'Delivered' : 'Sent'"
+                >{{ message.readAt || message.deliveredAt ? '✓✓' : '✓' }}</span>
+              }
             </div>
           </article>
         }
