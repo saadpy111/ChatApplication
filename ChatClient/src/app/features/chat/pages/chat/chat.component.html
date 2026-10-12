@@ -26,6 +26,7 @@
     [sendResult]="sendResult()"
     [currentUserId]="authService.currentUser()?.userId ?? null"
     [currentUsername]="authService.currentUser()?.username ?? ''"
+    (readAcknowledged)="acknowledgeRead($event)"
     (messageSubmitted)="sendMessage($event)"
     (loadOlder)="loadOlderMessages()"
     (retryHistory)="retryCurrentConversation()"

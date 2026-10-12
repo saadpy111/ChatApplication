@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { vi } from 'vitest';
 import { ChatConversationComponent } from './chat-conversation.component';
 import { MessageSendRequest, MessageSendResult } from '../../models/chat-message.model';
 
@@ -6,17 +7,26 @@ describe('ChatConversationComponent composer', () => {
   let fixture: ReturnType<typeof TestBed.createComponent<ChatConversationComponent>>;
   let component: ChatConversationComponent;
   let sentRequests: MessageSendRequest[];
+  let readAcknowledgements: { conversationId: number; lastReadMessageId: number }[];
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({ imports: [ChatConversationComponent] }).compileComponents();
     fixture = TestBed.createComponent(ChatConversationComponent);
     component = fixture.componentInstance;
     sentRequests = [];
+    readAcknowledgements = [];
     component.messageSubmitted.subscribe((request) => sentRequests.push(request));
+    component.readAcknowledged.subscribe((request) => readAcknowledgements.push(request));
     fixture.componentRef.setInput('friend', { userId: 'friend-id', username: 'Morgan' });
     fixture.componentRef.setInput('conversationId', 42);
     fixture.componentRef.setInput('connectionStatus', 'connected');
     fixture.detectChanges();
+  });
+
+  afterEach(() => {
+    fixture.destroy();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('restores textarea focus after Enter sends and allows consecutive sends', () => {
@@ -199,6 +209,74 @@ describe('ChatConversationComponent composer', () => {
     fixture.detectChanges();
     expect(getTextarea()).toBe(textarea);
     expect(document.activeElement).toBe(textarea);
+  });
+
+  it('renders sent, delivered, and read states only for own messages', () => {
+    fixture.componentRef.setInput('currentUserId', 'me');
+    fixture.componentRef.setInput('messages', [
+      { id: 1, text: 'Sent', senderId: 'me', sentAt: new Date() },
+      { id: 2, text: 'Delivered', senderId: 'me', sentAt: new Date(), deliveredAt: '2026-10-11T12:00:00Z' },
+      { id: 3, text: 'Read', senderId: 'me', sentAt: new Date(), deliveredAt: '2026-10-11T12:00:00Z', readAt: '2026-10-11T12:01:00Z' },
+      { id: 4, text: 'Incoming', senderId: 'friend-id', sentAt: new Date(), deliveredAt: null, readAt: null },
+    ]);
+    fixture.detectChanges();
+
+    const indicators = [...fixture.nativeElement.querySelectorAll('.message-status')] as HTMLElement[];
+    expect(indicators.map((indicator) => indicator.getAttribute('aria-label'))).toEqual(['Sent', 'Delivered', 'Read']);
+    expect(indicators.map((indicator) => indicator.textContent)).toEqual(['✓', '✓✓', '✓✓']);
+  });
+
+  it('acknowledges visible incoming messages once and disconnects observation on destroy', () => {
+    class TestIntersectionObserver {
+      static instance: TestIntersectionObserver;
+      readonly targets: Element[] = [];
+      disconnected = false;
+
+      constructor(private readonly callback: IntersectionObserverCallback) {
+        TestIntersectionObserver.instance = this;
+      }
+
+      observe(target: Element): void {
+        this.targets.push(target);
+      }
+
+      disconnect(): void {
+        this.disconnected = true;
+      }
+
+      trigger(target: Element): void {
+        this.callback(
+          [{ target, isIntersecting: true, intersectionRatio: 1 } as IntersectionObserverEntry],
+          this as unknown as IntersectionObserver,
+        );
+      }
+    }
+
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    vi.stubGlobal('IntersectionObserver', TestIntersectionObserver);
+    fixture.componentRef.setInput('currentUserId', 'me');
+    fixture.componentRef.setInput('messages', [
+      { id: 10, text: 'Incoming', senderId: 'friend-id', sentAt: new Date() },
+      { id: 11, text: 'Outgoing', senderId: 'me', sentAt: new Date() },
+    ]);
+    fixture.detectChanges();
+    const messageList = fixture.nativeElement.querySelector('.message-list') as HTMLElement;
+    vi.spyOn(messageList, 'getClientRects').mockReturnValue([{ } as DOMRect] as unknown as DOMRectList);
+    expect(document.visibilityState).toBe('visible');
+    expect(typeof IntersectionObserver).toBe('function');
+    expect(messageList.getClientRects().length).toBe(1);
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    const incoming = fixture.nativeElement.querySelector('[data-message-id="10"]') as HTMLElement;
+    const outgoing = fixture.nativeElement.querySelector('[data-message-id="11"]') as HTMLElement;
+    const observer = TestIntersectionObserver.instance;
+    observer.trigger(incoming);
+    observer.trigger(outgoing);
+    observer.trigger(incoming);
+
+    expect(readAcknowledgements).toEqual([{ conversationId: 42, lastReadMessageId: 10 }]);
+    fixture.destroy();
+    expect(observer.disconnected).toBe(true);
   });
 
   function getTextarea(): HTMLTextAreaElement {

@@ -29,6 +29,8 @@
 .message-author { color: #c7d2fe; font-size: 11px; font-weight: 650; }
 .message-meta time { color: #a5b4c8; font-size: 10px; }
 .message-body p { margin: 0; color: var(--text); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.message-status { display: block; width: max-content; margin: 3px 0 0 auto; color: #aeb8c5; font-size: 12px; line-height: 1; }
+.message-status.read-receipt { color: #fff; }
 .composer-wrap { width: min(100%, 1000px); flex: 0 0 auto; margin: 0 auto; padding: 10px clamp(14px, 3vw, 32px) max(14px, env(safe-area-inset-bottom)); background: var(--history-bg); }
 .connection-error { margin-bottom: 8px; color: var(--error); font-size: 12px; }
 .composer { padding: 10px 12px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--input-bg); }

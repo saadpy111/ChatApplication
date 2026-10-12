@@ -17,4 +17,16 @@ public interface IConversationService
         string senderId,
         string content,
         CancellationToken cancellationToken);
+    Task<(MessageDto Message, string SenderId)?> MarkMessageAsDeliveredAsync(
+        long messageId,
+        string recipientId,
+        CancellationToken cancellationToken);
+    Task<IReadOnlyList<(MessageDto Message, string SenderId)>> ReconcilePendingDeliveriesAsync(
+        string recipientId,
+        CancellationToken cancellationToken);
+    Task<IReadOnlyList<(MessageDto Message, string SenderId)>?> MarkMessagesAsReadAsync(
+        long conversationId,
+        long lastReadMessageId,
+        string readerId,
+        CancellationToken cancellationToken);
 }

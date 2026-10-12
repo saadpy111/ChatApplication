@@ -12,18 +12,26 @@ describe('ChatService', () => {
     senderId: 'sender',
     content: 'Hello',
     createdAt: '2026-10-11T12:00:00Z',
+    deliveredAt: null,
+    readAt: null,
   };
 
   let service: ChatService;
   let receiveMessage: ((message: PersistedMessage) => void) | undefined;
+  let updateMessageStatus: ((message: PersistedMessage) => void) | undefined;
   let notifyReconnect: (() => void) | undefined;
+  let completeConnectionStart: (() => void) | undefined;
+  let deferConnectionStart: boolean;
   let connectionState: HubConnectionState;
   let buildSpy: ReturnType<typeof vi.spyOn>;
   let invoke: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     receiveMessage = undefined;
+    updateMessageStatus = undefined;
     notifyReconnect = undefined;
+    completeConnectionStart = undefined;
+    deferConnectionStart = false;
     connectionState = HubConnectionState.Disconnected;
     invoke = vi.fn().mockResolvedValue(message);
 
@@ -31,13 +39,25 @@ describe('ChatService', () => {
       get state() {
         return connectionState;
       },
-      start: vi.fn(async () => {
+      start: vi.fn(() => {
+        if (deferConnectionStart) {
+          return new Promise<void>((resolve) => {
+            completeConnectionStart = () => {
+              connectionState = HubConnectionState.Connected;
+              resolve();
+            };
+          });
+        }
+
         connectionState = HubConnectionState.Connected;
+        return Promise.resolve();
       }),
       invoke,
       on: vi.fn((eventName: string, handler: (message: PersistedMessage) => void) => {
         if (eventName === 'ReceiveMessage') {
           receiveMessage = handler;
+        } else if (eventName === 'MessageStatusUpdated') {
+          updateMessageStatus = handler;
         }
       }),
       onreconnecting: vi.fn(),
@@ -96,5 +116,67 @@ describe('ChatService', () => {
 
     await expect(service.sendMessage(42, 'Hello')).resolves.toEqual(message);
     expect(invoke).toHaveBeenCalledExactlyOnceWith('SendMessage', 42, 'Hello');
+  });
+
+  it('invokes delivery and read acknowledgements through the existing connection', async () => {
+    await service.startConnection();
+
+    service.acknowledgeDelivered(1);
+    service.acknowledgeRead(42, 1);
+
+    expect(invoke).toHaveBeenNthCalledWith(1, 'AcknowledgeDelivered', 1);
+    expect(invoke).toHaveBeenNthCalledWith(2, 'AcknowledgeRead', 42, 1);
+  });
+
+  it('emits validated message status updates', async () => {
+    const subscriber = vi.fn();
+    service.messageStatusUpdates$.subscribe(subscriber);
+    await service.startConnection();
+    const updatedMessage = { ...message, deliveredAt: '2026-10-11T12:01:00Z' };
+    updateMessageStatus?.(updatedMessage);
+
+    expect(subscriber).toHaveBeenCalledExactlyOnceWith(updatedMessage);
+  });
+
+  it('does not invoke the same completed acknowledgement twice', async () => {
+    await service.startConnection();
+
+    service.acknowledgeDelivered(1);
+    service.acknowledgeDelivered(1);
+
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('AcknowledgeDelivered', 1);
+  });
+
+  it('sends a queued historical delivery acknowledgement after connection startup', async () => {
+    deferConnectionStart = true;
+    const connectionAttempt = service.startConnection();
+
+    service.acknowledgeDelivered(message.id);
+    expect(invoke).not.toHaveBeenCalled();
+
+    completeConnectionStart?.();
+    await connectionAttempt;
+
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('AcknowledgeDelivered', message.id);
+  });
+
+  it('coalesces pending-delivery reconciliation calls through the existing hub', async () => {
+    await service.startConnection();
+
+    service.reconcilePendingDeliveries();
+    service.reconcilePendingDeliveries();
+
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('ReconcilePendingDeliveries');
+  });
+
+  it('queues pending-delivery reconciliation until connection startup completes', async () => {
+    deferConnectionStart = true;
+    service.reconcilePendingDeliveries();
+    expect(invoke).not.toHaveBeenCalled();
+
+    completeConnectionStart?.();
+    await service.startConnection();
+
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('ReconcilePendingDeliveries');
   });
 });
