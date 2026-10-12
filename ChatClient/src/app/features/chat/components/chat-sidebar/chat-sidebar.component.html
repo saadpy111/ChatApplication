@@ -29,7 +29,7 @@
           (click)="selectFriend(friend)"
         >
           <span class="friend-avatar" aria-hidden="true">{{ friend.username.charAt(0).toUpperCase() || '?' }}</span>
-          <span class="friend-name">{{ friend.username }}</span>
+          <span class="friend-name" dir="auto">{{ friend.username }}</span>
         </button>
       }
       @if (openingConversation()) {
@@ -61,8 +61,8 @@
         >
           <span class="friend-avatar" aria-hidden="true">{{ conversation.otherUsername.charAt(0).toUpperCase() || '?' }}</span>
           <span class="conversation-copy">
-            <span class="friend-name">{{ conversation.otherUsername }}</span>
-            <span class="conversation-preview">{{ conversation.lastMessagePreview || 'Start a conversation' }}</span>
+            <span class="friend-name" dir="auto">{{ conversation.otherUsername }}</span>
+            <span class="conversation-preview" dir="auto">{{ conversation.lastMessagePreview || 'Start a conversation' }}</span>
           </span>
           @if (conversation.lastMessageAt; as lastMessageAt) {
             <time class="conversation-time">{{ lastMessageAt | date:'shortTime' }}</time>

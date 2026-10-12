@@ -8,7 +8,7 @@
     }
     <div class="room-heading">
       @if (friend(); as selected) {
-        <h1>{{ selected.username }}</h1>
+        <h1 dir="auto">{{ selected.username }}</h1>
       } @else {
         <h1>Messages</h1>
       }
@@ -31,7 +31,13 @@
 
   <section #messageList class="message-list" aria-label="Conversation" aria-live="polite" aria-relevant="additions" (scroll)="handleScroll($event)">
     @if (!friend()) {
-      <div class="empty-state">
+      <div class="empty-state empty-state-conversation">
+        <span class="empty-state-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H6l-3 2v-5.5A7.5 7.5 0 1 1 20 11.5Z" />
+            <path d="M8 11h.01M12 11h.01M16 11h.01" />
+          </svg>
+        </span>
         <h2>Choose a conversation</h2>
         <p>Select a conversation or search for someone by username.</p>
       </div>
@@ -99,6 +105,7 @@
           maxlength="2000"
           placeholder="Write a message..."
           aria-label="Message"
+          dir="auto"
           [disabled]="!conversationId() || connectionStatus() !== 'connected' || sending()"
           (keydown.enter)="handleEnter($event)"
         ></textarea>
