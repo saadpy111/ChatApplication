@@ -42,6 +42,10 @@ public class ChatHub : Hub
         return saved.Value.Message;
     }
 
+    public Task TypingStarted(long conversationId) => SendTypingEventAsync(conversationId, true);
+
+    public Task TypingStopped(long conversationId) => SendTypingEventAsync(conversationId, false);
+
     public async Task AcknowledgeDelivered(long messageId)
     {
         var recipientId = Context.UserIdentifier;
@@ -110,6 +114,39 @@ public class ChatHub : Hub
         {
             ConversationId = conversationId,
             UnreadCount = unreadCount
+        }, Context.ConnectionAborted);
+    }
+
+    private async Task SendTypingEventAsync(long conversationId, bool isTyping)
+    {
+        var userId = Context.UserIdentifier;
+        if (string.IsNullOrEmpty(userId))
+        {
+            throw new HubException("The user could not be identified.");
+        }
+
+        var typingTarget = await _conversationService.GetTypingTargetAsync(
+            conversationId, userId, Context.ConnectionAborted);
+        if (typingTarget is null)
+        {
+            throw new HubException("The conversation is unavailable.");
+        }
+
+        if (isTyping)
+        {
+            await Clients.User(typingTarget.Value.RecipientId).SendAsync("UserTyping", new
+            {
+                ConversationId = conversationId,
+                UserId = userId,
+                DisplayName = typingTarget.Value.SenderDisplayName
+            }, Context.ConnectionAborted);
+            return;
+        }
+
+        await Clients.User(typingTarget.Value.RecipientId).SendAsync("UserStoppedTyping", new
+        {
+            ConversationId = conversationId,
+            UserId = userId
         }, Context.ConnectionAborted);
     }
 }

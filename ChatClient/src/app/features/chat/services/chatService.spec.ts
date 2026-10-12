@@ -20,10 +20,14 @@ describe('ChatService', () => {
   let receiveMessage: ((message: PersistedMessage) => void) | undefined;
   let updateMessageStatus: ((message: PersistedMessage) => void) | undefined;
   let updateUnreadCount: ((update: { conversationId: number; unreadCount: number }) => void) | undefined;
+  let userTyping: ((event: { conversationId: number; userId: string; displayName: string }) => void) | undefined;
+  let userStoppedTyping: ((event: { conversationId: number; userId: string }) => void) | undefined;
   let notifyReconnect: (() => void) | undefined;
+  let notifyReconnecting: (() => void) | undefined;
   let completeConnectionStart: (() => void) | undefined;
   let deferConnectionStart: boolean;
   let connectionState: HubConnectionState;
+  let registerHandler: ReturnType<typeof vi.fn>;
   let buildSpy: ReturnType<typeof vi.spyOn>;
   let invoke: ReturnType<typeof vi.fn>;
 
@@ -31,10 +35,26 @@ describe('ChatService', () => {
     receiveMessage = undefined;
     updateMessageStatus = undefined;
     updateUnreadCount = undefined;
+    userTyping = undefined;
+    userStoppedTyping = undefined;
     notifyReconnect = undefined;
+    notifyReconnecting = undefined;
     completeConnectionStart = undefined;
     deferConnectionStart = false;
     connectionState = HubConnectionState.Disconnected;
+    registerHandler = vi.fn((eventName: string, handler: (message: PersistedMessage) => void) => {
+      if (eventName === 'ReceiveMessage') {
+        receiveMessage = handler;
+      } else if (eventName === 'MessageStatusUpdated') {
+        updateMessageStatus = handler;
+      } else if (eventName === 'UnreadCountUpdated') {
+        updateUnreadCount = handler as unknown as (update: { conversationId: number; unreadCount: number }) => void;
+      } else if (eventName === 'UserTyping') {
+        userTyping = handler as unknown as (event: { conversationId: number; userId: string; displayName: string }) => void;
+      } else if (eventName === 'UserStoppedTyping') {
+        userStoppedTyping = handler as unknown as (event: { conversationId: number; userId: string }) => void;
+      }
+    });
     invoke = vi.fn().mockResolvedValue(message);
 
     const connection = {
@@ -55,16 +75,10 @@ describe('ChatService', () => {
         return Promise.resolve();
       }),
       invoke,
-      on: vi.fn((eventName: string, handler: (message: PersistedMessage) => void) => {
-        if (eventName === 'ReceiveMessage') {
-          receiveMessage = handler;
-        } else if (eventName === 'MessageStatusUpdated') {
-          updateMessageStatus = handler;
-        } else if (eventName === 'UnreadCountUpdated') {
-          updateUnreadCount = handler as unknown as (update: { conversationId: number; unreadCount: number }) => void;
-        }
+      on: registerHandler,
+      onreconnecting: vi.fn((handler: () => void) => {
+        notifyReconnecting = handler;
       }),
-      onreconnecting: vi.fn(),
       onreconnected: vi.fn((handler: () => void) => {
         notifyReconnect = handler;
       }),
@@ -152,6 +166,47 @@ describe('ChatService', () => {
     updateUnreadCount?.({ conversationId: 42, unreadCount: -1 });
 
     expect(subscriber).toHaveBeenCalledExactlyOnceWith(update);
+  });
+
+  it('registers and emits validated typing events from the existing connection', async () => {
+    const typingSubscriber = vi.fn();
+    const stoppedSubscriber = vi.fn();
+    service.userTyping$.subscribe(typingSubscriber);
+    service.userStoppedTyping$.subscribe(stoppedSubscriber);
+    await service.startConnection();
+
+    const typingEvent = { conversationId: 42, userId: 'friend', displayName: 'Morgan' };
+    userTyping?.(typingEvent);
+    userTyping?.({ ...typingEvent, conversationId: 0 });
+    userStoppedTyping?.({ conversationId: 42, userId: 'friend' });
+    userStoppedTyping?.({ conversationId: 42, userId: '' });
+
+    expect(typingSubscriber).toHaveBeenCalledExactlyOnceWith(typingEvent);
+    expect(stoppedSubscriber).toHaveBeenCalledExactlyOnceWith({ conversationId: 42, userId: 'friend' });
+  });
+
+  it('registers typing handlers only once when connection startup is repeated', async () => {
+    await service.startConnection();
+    await service.startConnection();
+
+    expect(registerHandler.mock.calls.filter(([eventName]) => eventName === 'UserTyping')).toHaveLength(1);
+    expect(registerHandler.mock.calls.filter(([eventName]) => eventName === 'UserStoppedTyping')).toHaveLength(1);
+  });
+
+  it('invokes typing events without throwing while disconnected and clears state on connection loss', async () => {
+    const connectionLost = vi.fn();
+    service.connectionLost$.subscribe(connectionLost);
+    service.startTyping(42);
+    expect(invoke).not.toHaveBeenCalled();
+
+    await service.startConnection();
+    service.startTyping(42);
+    service.stopTyping(42);
+    expect(invoke).toHaveBeenNthCalledWith(1, 'TypingStarted', 42);
+    expect(invoke).toHaveBeenNthCalledWith(2, 'TypingStopped', 42);
+
+    notifyReconnecting?.();
+    expect(connectionLost).toHaveBeenCalledExactlyOnceWith(undefined);
   });
 
   it('does not invoke the same completed acknowledgement twice', async () => {

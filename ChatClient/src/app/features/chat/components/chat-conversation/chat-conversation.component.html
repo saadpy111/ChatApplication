@@ -93,6 +93,12 @@
 
   @if (friend()) {
     <footer class="composer-wrap">
+      <div class="typing-indicator" role="status" aria-live="polite" aria-atomic="true">
+        @if (typingUsername(); as username) {
+          <span dir="auto">{{ username }} is typing</span>
+          <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        }
+      </div>
       @if (connectionError()) {
         <div class="connection-error" role="status">{{ connectionError() }}</div>
       }
@@ -107,6 +113,7 @@
           aria-label="Message"
           dir="auto"
           [disabled]="!conversationId() || connectionStatus() !== 'connected' || sending()"
+          (input)="handleDraftInput()"
           (keydown.enter)="handleEnter($event)"
         ></textarea>
         <div class="composer-footer">

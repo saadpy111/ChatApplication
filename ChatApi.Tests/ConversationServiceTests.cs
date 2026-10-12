@@ -1,13 +1,18 @@
 using ChatApi.Data;
+using ChatApi.Hubs;
 using ChatApi.Models;
 using ChatApi.Services.Conversations;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Reflection;
+using System.Security.Claims;
 using Xunit;
 
 namespace ChatApi.Tests;
@@ -108,6 +113,62 @@ public sealed class ConversationServiceTests : IAsyncLifetime
         Assert.Equal("user-b", sent.Value.RecipientId);
         Assert.Null(stored.DeliveredAt);
         Assert.Null(stored.ReadAt);
+    }
+
+    [Fact]
+    public async Task GetTypingTargetRequiresMembershipAndUsesSenderUsername()
+    {
+        var conversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
+        Assert.NotNull(conversation);
+
+        var recipient = await _service.GetTypingTargetAsync(
+            conversation.ConversationId, "user-a", CancellationToken.None);
+        var reverseRecipient = await _service.GetTypingTargetAsync(
+            conversation.ConversationId, "user-b", CancellationToken.None);
+        var unauthorized = await _service.GetTypingTargetAsync(
+            conversation.ConversationId, "user-c", CancellationToken.None);
+
+        Assert.Equal(("user-b", "alice"), recipient);
+        Assert.Equal(("user-a", "bob"), reverseRecipient);
+        Assert.Null(unauthorized);
+        Assert.Empty(await _dbContext.Messages.ToListAsync());
+    }
+
+    [Fact]
+    public async Task HubTypingEventsUseAuthenticatedSenderAndTargetOnlyConversationPartner()
+    {
+        var conversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
+        Assert.NotNull(conversation);
+        var transport = new RecordingHubTransport();
+        var hub = new ChatHub(_service)
+        {
+            Context = new TestHubCallerContext("user-a"),
+            Clients = transport.Clients
+        };
+
+        await hub.TypingStarted(conversation.ConversationId);
+
+        Assert.Equal("user-b", transport.RecipientId);
+        Assert.Equal("UserTyping", transport.EventName);
+        Assert.Equal(conversation.ConversationId, GetPayloadValue<long>(transport.Payload!, "ConversationId"));
+        Assert.Equal("user-a", GetPayloadValue<string>(transport.Payload!, "UserId"));
+        Assert.Equal("alice", GetPayloadValue<string>(transport.Payload!, "DisplayName"));
+
+        await hub.TypingStopped(conversation.ConversationId);
+
+        Assert.Equal("user-b", transport.RecipientId);
+        Assert.Equal("UserStoppedTyping", transport.EventName);
+        Assert.Equal("user-a", GetPayloadValue<string>(transport.Payload!, "UserId"));
+        Assert.Empty(await _dbContext.Messages.ToListAsync());
+
+        var unauthorizedTransport = new RecordingHubTransport();
+        var unauthorizedHub = new ChatHub(_service)
+        {
+            Context = new TestHubCallerContext("user-c"),
+            Clients = unauthorizedTransport.Clients
+        };
+        await Assert.ThrowsAsync<HubException>(() => unauthorizedHub.TypingStarted(conversation.ConversationId));
+        Assert.Null(unauthorizedTransport.RecipientId);
     }
 
     [Fact]
@@ -421,5 +482,85 @@ public sealed class ConversationServiceTests : IAsyncLifetime
         Assert.Equal("newest", updatedPage[0].LastMessagePreview);
         Assert.NotNull(updatedPage[0].LastMessageAt);
         Assert.Equal(2, updatedPage.Count);
+    }
+
+    private static T GetPayloadValue<T>(object payload, string propertyName)
+    {
+        return (T)payload.GetType().GetProperty(propertyName)!.GetValue(payload)!;
+    }
+
+    private sealed class TestHubCallerContext(string userId) : HubCallerContext
+    {
+        private readonly IDictionary<object, object?> _items = new Dictionary<object, object?>();
+
+        public override string ConnectionId => "test-connection";
+        public override string? UserIdentifier => userId;
+        public override ClaimsPrincipal? User => new(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userId)]));
+        public override IDictionary<object, object?> Items => _items;
+        public override IFeatureCollection Features { get; } = new FeatureCollection();
+        public override CancellationToken ConnectionAborted => CancellationToken.None;
+        public override void Abort() { }
+    }
+
+    private sealed class RecordingHubTransport
+    {
+        private readonly IClientProxy _client;
+        private readonly IHubCallerClients _clients;
+
+        public RecordingHubTransport()
+        {
+            _client = DispatchProxy.Create<IClientProxy, RecordingClientProxy>();
+            ((RecordingClientProxy)(object)_client).Sent = (eventName, payload) =>
+            {
+                EventName = eventName;
+                Payload = payload;
+            };
+            _clients = DispatchProxy.Create<IHubCallerClients, RecordingClientsProxy>();
+            ((RecordingClientsProxy)(object)_clients).Initialize(_client, recipientId => RecipientId = recipientId);
+        }
+
+        public IHubCallerClients Clients => _clients;
+        public string? RecipientId { get; private set; }
+        public string? EventName { get; private set; }
+        public object? Payload { get; private set; }
+    }
+
+    public class RecordingClientsProxy : DispatchProxy
+    {
+        private IClientProxy _client = null!;
+        private Action<string>? _recipientSelected;
+
+        public void Initialize(IClientProxy client, Action<string> recipientSelected)
+        {
+            _client = client;
+            _recipientSelected = recipientSelected;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name == "User")
+            {
+                _recipientSelected?.Invoke((string)args![0]!);
+                return _client;
+            }
+
+            throw new NotSupportedException($"Unexpected SignalR client method: {targetMethod?.Name}");
+        }
+    }
+
+    public class RecordingClientProxy : DispatchProxy
+    {
+        public Action<string, object?>? Sent { get; set; }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name == nameof(IClientProxy.SendCoreAsync))
+            {
+                Sent?.Invoke((string)args![0]!, ((object?[])args[1]!)[0]);
+                return Task.CompletedTask;
+            }
+
+            throw new NotSupportedException($"Unexpected SignalR proxy method: {targetMethod?.Name}");
+        }
     }
 }

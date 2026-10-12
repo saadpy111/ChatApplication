@@ -130,6 +130,25 @@ public class ConversationService : IConversationService
             .CountAsync(cancellationToken);
     }
 
+    public async Task<(string RecipientId, string SenderDisplayName)?> GetTypingTargetAsync(
+        long conversationId,
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        var participant = await _dbContext.Conversations
+            .AsNoTracking()
+            .Where(conversation => conversation.Id == conversationId &&
+                (conversation.User1Id == userId || conversation.User2Id == userId))
+            .Select(conversation => conversation.User1Id == userId
+                ? new { RecipientId = conversation.User2Id, SenderDisplayName = conversation.User1.UserName }
+                : new { RecipientId = conversation.User1Id, SenderDisplayName = conversation.User2.UserName })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return participant is null
+            ? null
+            : (participant.RecipientId, participant.SenderDisplayName ?? string.Empty);
+    }
+
     public async Task<MessagePageDto?> GetMessagesAsync(
         long conversationId,
         string userId,

@@ -7,6 +7,8 @@ describe('ChatConversationComponent composer', () => {
   let fixture: ReturnType<typeof TestBed.createComponent<ChatConversationComponent>>;
   let component: ChatConversationComponent;
   let sentRequests: MessageSendRequest[];
+  let typingStarted: number[];
+  let typingStopped: number[];
   let readAcknowledgements: { conversationId: number; lastReadMessageId: number }[];
 
   beforeEach(async () => {
@@ -14,8 +16,12 @@ describe('ChatConversationComponent composer', () => {
     fixture = TestBed.createComponent(ChatConversationComponent);
     component = fixture.componentInstance;
     sentRequests = [];
+    typingStarted = [];
+    typingStopped = [];
     readAcknowledgements = [];
     component.messageSubmitted.subscribe((request) => sentRequests.push(request));
+    component.typingStarted.subscribe((conversationId) => typingStarted.push(conversationId));
+    component.typingStopped.subscribe((conversationId) => typingStopped.push(conversationId));
     component.readAcknowledged.subscribe((request) => readAcknowledgements.push(request));
     fixture.componentRef.setInput('friend', { userId: 'friend-id', username: 'Morgan' });
     fixture.componentRef.setInput('conversationId', 42);
@@ -25,6 +31,7 @@ describe('ChatConversationComponent composer', () => {
 
   afterEach(() => {
     fixture.destroy();
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -173,6 +180,41 @@ describe('ChatConversationComponent composer', () => {
     setDraft('  \n  ');
     component.send();
     expect(sentRequests).toHaveLength(0);
+  });
+
+  it('throttles typing starts and stops after composer inactivity', () => {
+    vi.useFakeTimers();
+    setDraft('Hello');
+    setDraft('Hello again');
+    expect(typingStarted).toEqual([42]);
+
+    vi.advanceTimersByTime(1800);
+    expect(typingStopped).toEqual([42]);
+  });
+
+  it('refreshes typing for sustained input and stops after a successful send', () => {
+    vi.useFakeTimers();
+    setDraft('Hello');
+    vi.advanceTimersByTime(1500);
+    setDraft('Hello there');
+    vi.advanceTimersByTime(1100);
+    setDraft('Hello again');
+    expect(typingStarted).toEqual([42, 42]);
+
+    component.send();
+    completeSend({ requestId: 1, conversationId: 42, succeeded: true });
+    expect(typingStopped).toEqual([42]);
+  });
+
+  it('stops typing on conversation switch and component destruction', () => {
+    setDraft('Hello');
+    fixture.componentRef.setInput('conversationId', 43);
+    fixture.detectChanges();
+    expect(typingStopped).toEqual([42]);
+
+    setDraft('Again');
+    fixture.destroy();
+    expect(typingStopped).toEqual([42]);
   });
 
   it('restores the draft after a failed send without stealing focus', () => {
