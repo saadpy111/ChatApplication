@@ -15,12 +15,15 @@
 .retry-button:hover { border-color: var(--accent); }
 .retry-button:focus-visible, .send-button:focus-visible, .back-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .message-list { display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: #39465c transparent; scrollbar-width: thin; }
-.message-list-inner { width: min(100%, 980px); margin: auto; padding: 28px clamp(16px, 4vw, 42px); }
+.message-list-inner { width: min(100%, 980px); min-height: 100%; flex: 0 0 auto; align-self: stretch; margin-inline: auto; padding: 28px clamp(16px, 4vw, 42px); }
 .empty-state { align-self: center; width: min(390px, calc(100% - 40px)); margin: auto; padding: 36px 0; }
+.empty-state-conversation { text-align: center; }
+.empty-state-mark { display: grid; width: 56px; aspect-ratio: 1; place-items: center; margin: 0 auto 20px; border: 1px solid var(--border); border-radius: 16px; color: #c7d2fe; background: var(--surface); }
+.empty-state-mark svg { width: 28px; height: 28px; }
 .empty-state h2 { margin: 0 0 10px; color: var(--text); font-size: 22px; font-weight: 600; }
-.empty-state > p { max-width: 320px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
-.message { display: flex; min-width: 0; align-items: flex-end; gap: 9px; justify-content: flex-end; margin: 0 0 14px; }
-.message.own-message { justify-content: flex-start; }
+.empty-state > p { max-width: 320px; margin: 0 auto; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.message { display: flex; min-width: 0; align-items: flex-end; gap: 9px; justify-content: flex-start; margin: 0 0 14px; }
+.message.own-message { justify-content: flex-end; }
 .message-avatar { display: grid; width: 30px; flex: 0 0 auto; aspect-ratio: 1; place-items: center; border-radius: 50%; color: #dbeafe; background: #334155; font-size: 12px; font-weight: 650; }
 .own-message .message-avatar { color: #eef2ff; background: #4f46e5; }
 .message-body { width: fit-content; max-width: min(70%, 680px); min-width: 0; padding: 9px 12px 7px; border-radius: 12px 12px 3px 12px; color: var(--text); background: var(--received-bubble); }
@@ -31,7 +34,7 @@
 .message-meta time { color: #a5b4c8; font-size: 10px; }
 .message-body p { margin: 0; color: var(--text); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
 .message-status { display: block; width: max-content; margin: 3px 0 0 auto; color: #aeb8c5; font-size: 12px; line-height: 1; }
-.message-status.read-receipt { color: #fff; }
+.message-status.read-receipt { color: #7dd3fc; }
 .composer-wrap { width: min(100%, 1000px); flex: 0 0 auto; margin: 0 auto; padding: 10px clamp(14px, 3vw, 32px) max(14px, env(safe-area-inset-bottom)); background: var(--history-bg); }
 .connection-error { margin-bottom: 8px; color: var(--error); font-size: 12px; }
 .composer { padding: 10px 12px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--input-bg); }

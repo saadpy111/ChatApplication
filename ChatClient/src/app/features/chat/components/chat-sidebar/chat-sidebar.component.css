@@ -24,9 +24,9 @@
 .search-state { margin: 7px 2px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .search-error { color: var(--error); }
 .retry-link { padding: 0; border: 0; color: inherit; background: transparent; font: inherit; text-decoration: underline; cursor: pointer; }
-.friend-row { display: flex; min-width: 0; min-height: 48px; align-items: center; gap: 10px; padding: 7px 8px; border: 0; border-radius: 6px; color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+.friend-row { display: flex; min-width: 0; min-height: 48px; align-items: center; gap: 10px; padding: 7px 8px; border: 0; border-inline-start: 3px solid transparent; border-radius: 6px; color: var(--text); background: transparent; text-align: start; cursor: pointer; }
 .friend-row:hover { background: var(--surface); }
-.friend-row.selected { background: rgb(99 102 241 / 18%); }
+.friend-row.selected { border-inline-start-color: var(--accent); background: rgb(99 102 241 / 18%); }
 .friend-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .friend-avatar { display: grid; width: 36px; flex: 0 0 auto; aspect-ratio: 1; place-items: center; border-radius: 50%; color: #eef2ff; background: #39466a; font-size: 14px; font-weight: 650; }
 .friend-name { min-width: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
