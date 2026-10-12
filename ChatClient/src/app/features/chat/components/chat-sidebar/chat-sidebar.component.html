@@ -61,7 +61,17 @@
         >
           <span class="friend-avatar" aria-hidden="true">{{ conversation.otherUsername.charAt(0).toUpperCase() || '?' }}</span>
           <span class="conversation-copy">
-            <span class="friend-name" dir="auto">{{ conversation.otherUsername }}</span>
+            <span class="conversation-heading">
+              <span class="friend-name" dir="auto">{{ conversation.otherUsername }}</span>
+              @if (conversation.unreadCount > 0) {
+                <span
+                  class="unread-badge"
+                  role="img"
+                  [attr.aria-label]="conversation.unreadCount + (conversation.unreadCount === 1 ? ' unread message' : ' unread messages')"
+                  [title]="conversation.unreadCount + (conversation.unreadCount === 1 ? ' unread message' : ' unread messages')"
+                >{{ conversation.unreadCount > 99 ? '99+' : conversation.unreadCount }}</span>
+              }
+            </span>
             <span class="conversation-preview" dir="auto">{{ conversation.lastMessagePreview || 'Start a conversation' }}</span>
           </span>
           @if (conversation.lastMessageAt; as lastMessageAt) {

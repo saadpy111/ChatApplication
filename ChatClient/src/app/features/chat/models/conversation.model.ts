@@ -5,6 +5,12 @@ export interface ConversationSummary {
   lastMessagePreview: string | null;
   lastMessageAt: string | null;
   createdAt: string;
+  unreadCount: number;
+}
+
+export interface UnreadCountUpdate {
+  conversationId: number;
+  unreadCount: number;
 }
 
 export interface OpenConversation {

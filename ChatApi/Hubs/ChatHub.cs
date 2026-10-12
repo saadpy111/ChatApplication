@@ -38,6 +38,7 @@ public class ChatHub : Hub
 
         await Clients.Users(senderId, saved.Value.RecipientId)
             .SendAsync("ReceiveMessage", saved.Value.Message, Context.ConnectionAborted);
+        await SendUnreadCountUpdatedAsync(saved.Value.Message.ConversationId, saved.Value.RecipientId);
         return saved.Value.Message;
     }
 
@@ -97,5 +98,18 @@ public class ChatHub : Hub
             await Clients.User(receipt.SenderId)
                 .SendAsync("MessageStatusUpdated", receipt.Message, Context.ConnectionAborted);
         }
+
+        await SendUnreadCountUpdatedAsync(conversationId, readerId);
+    }
+
+    private async Task SendUnreadCountUpdatedAsync(long conversationId, string userId)
+    {
+        var unreadCount = await _conversationService.GetUnreadCountAsync(
+            conversationId, userId, Context.ConnectionAborted);
+        await Clients.User(userId).SendAsync("UnreadCountUpdated", new
+        {
+            ConversationId = conversationId,
+            UnreadCount = unreadCount
+        }, Context.ConnectionAborted);
     }
 }

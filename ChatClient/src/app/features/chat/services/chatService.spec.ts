@@ -19,6 +19,7 @@ describe('ChatService', () => {
   let service: ChatService;
   let receiveMessage: ((message: PersistedMessage) => void) | undefined;
   let updateMessageStatus: ((message: PersistedMessage) => void) | undefined;
+  let updateUnreadCount: ((update: { conversationId: number; unreadCount: number }) => void) | undefined;
   let notifyReconnect: (() => void) | undefined;
   let completeConnectionStart: (() => void) | undefined;
   let deferConnectionStart: boolean;
@@ -29,6 +30,7 @@ describe('ChatService', () => {
   beforeEach(() => {
     receiveMessage = undefined;
     updateMessageStatus = undefined;
+    updateUnreadCount = undefined;
     notifyReconnect = undefined;
     completeConnectionStart = undefined;
     deferConnectionStart = false;
@@ -58,6 +60,8 @@ describe('ChatService', () => {
           receiveMessage = handler;
         } else if (eventName === 'MessageStatusUpdated') {
           updateMessageStatus = handler;
+        } else if (eventName === 'UnreadCountUpdated') {
+          updateUnreadCount = handler as unknown as (update: { conversationId: number; unreadCount: number }) => void;
         }
       }),
       onreconnecting: vi.fn(),
@@ -136,6 +140,18 @@ describe('ChatService', () => {
     updateMessageStatus?.(updatedMessage);
 
     expect(subscriber).toHaveBeenCalledExactlyOnceWith(updatedMessage);
+  });
+
+  it('emits validated authoritative unread count updates', async () => {
+    const subscriber = vi.fn();
+    service.unreadCountUpdates$.subscribe(subscriber);
+    await service.startConnection();
+    const update = { conversationId: 42, unreadCount: 3 };
+
+    updateUnreadCount?.(update);
+    updateUnreadCount?.({ conversationId: 42, unreadCount: -1 });
+
+    expect(subscriber).toHaveBeenCalledExactlyOnceWith(update);
   });
 
   it('does not invoke the same completed acknowledgement twice', async () => {

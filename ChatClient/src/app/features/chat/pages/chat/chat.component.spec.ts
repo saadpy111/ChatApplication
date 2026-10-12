@@ -12,6 +12,7 @@ import { signal } from '@angular/core';
 describe('ChatComponent message receipts', () => {
   const incomingMessages = new Subject<PersistedMessage>();
   const statusUpdates = new Subject<PersistedMessage>();
+  const unreadCountUpdates = new Subject<{ conversationId: number; unreadCount: number }>();
   const reconnected = new Subject<void>();
   const sendMessage = vi.fn();
   const acknowledgeDelivered = vi.fn();
@@ -64,6 +65,7 @@ describe('ChatComponent message receipts', () => {
           useValue: {
             incomingMessages$: incomingMessages.asObservable(),
             messageStatusUpdates$: statusUpdates.asObservable(),
+            unreadCountUpdates$: unreadCountUpdates.asObservable(),
             reconnected$: reconnected.asObservable(),
             status: signal('connected'),
             error: signal(null),
@@ -141,6 +143,7 @@ describe('ChatComponent message receipts', () => {
       lastMessagePreview: null,
       lastMessageAt: null,
       createdAt: '2026-10-11T11:00:00Z',
+      unreadCount: 0,
     });
     await fixture.whenStable();
 
@@ -152,5 +155,23 @@ describe('ChatComponent message receipts', () => {
     await fixture.whenStable();
 
     expect(reconcilePendingDeliveries).toHaveBeenCalledExactlyOnceWith();
+  });
+
+  it('applies authoritative unread counts without incrementing duplicate events', () => {
+    component.conversations.set([{
+      conversationId: 42,
+      otherUserId: 'user-b',
+      otherUsername: 'bob',
+      lastMessagePreview: 'hello',
+      lastMessageAt: '2026-10-11T12:00:00Z',
+      createdAt: '2026-10-11T11:00:00Z',
+      unreadCount: 1,
+    }]);
+    const update = { conversationId: 42, unreadCount: 3 };
+
+    unreadCountUpdates.next(update);
+    unreadCountUpdates.next(update);
+
+    expect(component.conversations()[0]?.unreadCount).toBe(3);
   });
 });

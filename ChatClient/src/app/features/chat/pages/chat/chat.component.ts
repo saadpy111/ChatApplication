@@ -2,7 +2,7 @@ import { Component, DestroyRef, inject, OnInit, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { ChatMessage, MessageSendRequest, MessageSendResult } from '../../models/chat-message.model';
-import { ConversationSummary, MessagePage, PersistedMessage } from '../../models/conversation.model';
+import { ConversationSummary, MessagePage, PersistedMessage, UnreadCountUpdate } from '../../models/conversation.model';
 import { ChatConversationComponent } from '../../components/chat-conversation/chat-conversation.component';
 import { ChatSidebarComponent } from '../../components/chat-sidebar/chat-sidebar.component';
 import { User } from '../../../users/models/user';
@@ -40,6 +40,8 @@ export class ChatComponent implements OnInit {
   private conversationLoadVersion = 0;
   private conversationsLoadVersion = 0;
   private readonly pendingStatusUpdates = new Map<number, PersistedMessage>();
+  private readonly pendingUnreadCountUpdates = new Map<number, { unreadCount: number; version: number }>();
+  private unreadCountVersion = 0;
 
   ngOnInit(): void {
     this.chatService.incomingMessages$
@@ -48,6 +50,9 @@ export class ChatComponent implements OnInit {
     this.chatService.messageStatusUpdates$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((message) => this.updateMessageStatus(message));
+    this.chatService.unreadCountUpdates$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((update) => this.updateUnreadCount(update));
     this.chatService.reconnected$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => void this.reconcileAfterReconnect());
@@ -198,12 +203,19 @@ export class ChatComponent implements OnInit {
 
   private async loadConversations(): Promise<void> {
     const loadVersion = ++this.conversationsLoadVersion;
+    const unreadUpdateVersion = this.unreadCountVersion;
     this.conversationsLoading.set(true);
     this.conversationsError.set(null);
     try {
       const conversations = await firstValueFrom(this.conversationsApi.getConversations());
       if (this.conversationsLoadVersion === loadVersion) {
-        this.conversations.set(conversations);
+        this.conversations.set(conversations.map((conversation) => {
+          const update = this.pendingUnreadCountUpdates.get(conversation.conversationId);
+          return update && update.version > unreadUpdateVersion
+            ? { ...conversation, unreadCount: update.unreadCount }
+            : conversation;
+        }));
+        this.pendingUnreadCountUpdates.clear();
         this.chatService.reconcilePendingDeliveries();
       }
     } catch {
@@ -288,6 +300,25 @@ export class ChatComponent implements OnInit {
       const rightDate = Date.parse(right.lastMessageAt ?? right.createdAt);
       return rightDate - leftDate || right.conversationId - left.conversationId;
     }));
+  }
+
+  private updateUnreadCount(update: UnreadCountUpdate): void {
+    const version = ++this.unreadCountVersion;
+    this.pendingUnreadCountUpdates.set(update.conversationId, {
+      unreadCount: update.unreadCount,
+      version,
+    });
+
+    if (!this.conversations().some((item) => item.conversationId === update.conversationId)) {
+      void this.loadConversations();
+      return;
+    }
+
+    this.conversations.update((items) => items.map((item) =>
+      item.conversationId === update.conversationId
+        ? { ...item, unreadCount: update.unreadCount }
+        : item,
+    ));
   }
 
   private async reconcileAfterReconnect(): Promise<void> {

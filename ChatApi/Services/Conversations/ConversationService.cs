@@ -92,6 +92,8 @@ public class ConversationService : IConversationService
                 OtherUsername = conversation.User1Id == userId
                     ? conversation.User2.UserName
                     : conversation.User1.UserName,
+                UnreadCount = conversation.Messages.Count(message =>
+                    message.SenderId != userId && message.ReadAt == null),
                 LastMessage = conversation.Messages
                     .OrderByDescending(message => message.CreatedAt)
                     .ThenByDescending(message => message.Id)
@@ -111,8 +113,21 @@ public class ConversationService : IConversationService
             LastMessageAt = item.LastMessage is null
                 ? null
                 : DateTime.SpecifyKind(item.LastMessage.CreatedAt, DateTimeKind.Utc),
-            CreatedAt = DateTime.SpecifyKind(item.CreatedAt, DateTimeKind.Utc)
+            CreatedAt = DateTime.SpecifyKind(item.CreatedAt, DateTimeKind.Utc),
+            UnreadCount = item.UnreadCount
         }).ToList();
+    }
+
+    public Task<int> GetUnreadCountAsync(
+        long conversationId,
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        return _dbContext.Messages
+            .Where(message => message.ConversationId == conversationId &&
+                message.SenderId != userId && message.ReadAt == null &&
+                (message.Conversation.User1Id == userId || message.Conversation.User2Id == userId))
+            .CountAsync(cancellationToken);
     }
 
     public async Task<MessagePageDto?> GetMessagesAsync(

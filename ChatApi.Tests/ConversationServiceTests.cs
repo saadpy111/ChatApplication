@@ -111,6 +111,65 @@ public sealed class ConversationServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetConversationsReturnsUnreadIncomingCountsPerConversation()
+    {
+        var firstConversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
+        var secondConversation = await _service.OpenAsync("user-a", "user-c", CancellationToken.None);
+        Assert.NotNull(firstConversation);
+        Assert.NotNull(secondConversation);
+
+        _dbContext.Messages.AddRange(
+            new Message
+            {
+                ConversationId = firstConversation.ConversationId,
+                SenderId = "user-b",
+                Content = "unread",
+                CreatedAt = DateTime.UtcNow
+            },
+            new Message
+            {
+                ConversationId = firstConversation.ConversationId,
+                SenderId = "user-b",
+                Content = "delivered but unread",
+                CreatedAt = DateTime.UtcNow.AddSeconds(1),
+                DeliveredAt = DateTime.UtcNow.AddSeconds(2)
+            },
+            new Message
+            {
+                ConversationId = firstConversation.ConversationId,
+                SenderId = "user-b",
+                Content = "read",
+                CreatedAt = DateTime.UtcNow.AddSeconds(3),
+                ReadAt = DateTime.UtcNow.AddSeconds(4)
+            },
+            new Message
+            {
+                ConversationId = firstConversation.ConversationId,
+                SenderId = "user-a",
+                Content = "outgoing",
+                CreatedAt = DateTime.UtcNow.AddSeconds(5)
+            },
+            new Message
+            {
+                ConversationId = secondConversation.ConversationId,
+                SenderId = "user-a",
+                Content = "other conversation outgoing",
+                CreatedAt = DateTime.UtcNow.AddSeconds(6)
+            });
+        await _dbContext.SaveChangesAsync();
+
+        var conversations = await _service.GetConversationsAsync("user-a", CancellationToken.None);
+        var first = Assert.Single(conversations, item => item.ConversationId == firstConversation.ConversationId);
+        var second = Assert.Single(conversations, item => item.ConversationId == secondConversation.ConversationId);
+        var otherUserConversations = await _service.GetConversationsAsync("user-b", CancellationToken.None);
+
+        Assert.Equal(2, first.UnreadCount);
+        Assert.Equal(0, second.UnreadCount);
+        Assert.Single(otherUserConversations);
+        Assert.Equal(1, otherUserConversations[0].UnreadCount);
+    }
+
+    [Fact]
     public async Task DeliveryAcknowledgementIsRecipientOnlyAndIdempotent()
     {
         var conversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
@@ -238,6 +297,8 @@ public sealed class ConversationServiceTests : IAsyncLifetime
         };
         _dbContext.Messages.AddRange(incomingBefore, outgoingBoundary, incomingAfter, unrelatedIncoming);
         await _dbContext.SaveChangesAsync();
+        Assert.Equal(2, await _service.GetUnreadCountAsync(
+            conversation.ConversationId, "user-b", CancellationToken.None));
 
         var marked = await _service.MarkMessagesAsReadAsync(
             conversation.ConversationId, outgoingBoundary.Id, "user-b", CancellationToken.None);
@@ -248,10 +309,14 @@ public sealed class ConversationServiceTests : IAsyncLifetime
 
         Assert.NotNull(marked);
         var receipt = Assert.Single(marked);
+        Assert.Equal(1, await _service.GetUnreadCountAsync(
+            conversation.ConversationId, "user-b", CancellationToken.None));
         Assert.Equal(incomingBefore.Id, receipt.Message.Id);
         Assert.NotNull(receipt.Message.DeliveredAt);
         Assert.NotNull(receipt.Message.ReadAt);
         Assert.Empty(markedAgain!);
+        Assert.Equal(1, await _service.GetUnreadCountAsync(
+            conversation.ConversationId, "user-b", CancellationToken.None));
         Assert.Null(denied);
         Assert.Null(incomingAfter.ReadAt);
         Assert.Null(outgoingBoundary.ReadAt);

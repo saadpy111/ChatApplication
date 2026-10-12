@@ -33,6 +33,9 @@
 .conversation-row { width: 100%; }
 .conversation-row:disabled { opacity: .65; }
 .conversation-copy { display: grid; min-width: 0; flex: 1; gap: 3px; }
+.conversation-heading { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.conversation-heading .friend-name { flex: 1; }
+.unread-badge { display: inline-grid; min-width: 19px; height: 19px; flex: 0 0 auto; place-items: center; padding: 0 5px; border-radius: 999px; color: #fff; background: var(--accent); font-size: 10px; font-weight: 700; line-height: 1; }
 .conversation-preview { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-time { flex: 0 0 auto; align-self: flex-start; padding-top: 2px; color: var(--muted); font-size: 10px; }
 
