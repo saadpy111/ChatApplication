@@ -2,7 +2,7 @@ import { inject, Injectable, signal } from '@angular/core';
 import { HubConnection, HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr';
 import { Subject } from 'rxjs';
 import { AuthService } from '../../../core/services/auth.service';
-import { PersistedMessage } from '../models/conversation.model';
+import { PersistedMessage, UnreadCountUpdate } from '../models/conversation.model';
 import { ChatConnectionStatus } from '../models/chat-message.model';
 
 @Injectable({ providedIn: 'root' })
@@ -10,6 +10,7 @@ export class ChatService {
   private readonly authService = inject(AuthService);
   private readonly incomingMessagesSubject = new Subject<PersistedMessage>();
   private readonly messageStatusUpdatesSubject = new Subject<PersistedMessage>();
+  private readonly unreadCountUpdatesSubject = new Subject<UnreadCountUpdate>();
   private readonly reconnectedSubject = new Subject<void>();
   private readonly pendingAcknowledgements = new Map<string, { method: string; args: unknown[] }>();
   private readonly acknowledgementAttempts = new Map<string, Promise<void>>();
@@ -21,6 +22,7 @@ export class ChatService {
 
   readonly incomingMessages$ = this.incomingMessagesSubject.asObservable();
   readonly messageStatusUpdates$ = this.messageStatusUpdatesSubject.asObservable();
+  readonly unreadCountUpdates$ = this.unreadCountUpdatesSubject.asObservable();
   readonly reconnected$ = this.reconnectedSubject.asObservable();
   readonly status = signal<ChatConnectionStatus>('disconnected');
   readonly error = signal<string | null>(null);
@@ -182,6 +184,11 @@ export class ChatService {
         this.messageStatusUpdatesSubject.next(payload);
       }
     });
+    connection.on('UnreadCountUpdated', (payload: unknown) => {
+      if (isUnreadCountUpdate(payload)) {
+        this.unreadCountUpdatesSubject.next(payload);
+      }
+    });
     connection.onreconnecting(() => this.status.set('reconnecting'));
     connection.onreconnected(() => {
       this.error.set(null);
@@ -210,4 +217,14 @@ function isPersistedMessage(payload: unknown): payload is PersistedMessage {
     && typeof message.createdAt === 'string'
     && (message.deliveredAt === null || typeof message.deliveredAt === 'string')
     && (message.readAt === null || typeof message.readAt === 'string');
+}
+
+function isUnreadCountUpdate(payload: unknown): payload is UnreadCountUpdate {
+  if (typeof payload !== 'object' || payload === null) {
+    return false;
+  }
+
+  const update = payload as Partial<UnreadCountUpdate>;
+  return Number.isSafeInteger(update.conversationId) && Number(update.conversationId) > 0
+    && Number.isSafeInteger(update.unreadCount) && Number(update.unreadCount) >= 0;
 }

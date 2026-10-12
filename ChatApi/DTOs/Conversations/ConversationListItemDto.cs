@@ -8,4 +8,5 @@ public class ConversationListItemDto
     public string? LastMessagePreview { get; init; }
     public DateTime? LastMessageAt { get; init; }
     public DateTime CreatedAt { get; init; }
+    public int UnreadCount { get; init; }
 }
