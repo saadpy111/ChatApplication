@@ -4,12 +4,16 @@ import { vi } from 'vitest';
 import { ConversationsApiService } from '../../services/conversations-api.service';
 import { UsersApiService } from '../../../users/data-access/users-api.service';
 import { User } from '../../../users/models/user';
+import { PersistedMessage } from '../../models/conversation.model';
+import { ChatService } from '../../services/chatService';
 import { ChatSidebarComponent } from './chat-sidebar.component';
 
 describe('ChatSidebarComponent', () => {
   let fixture: ReturnType<typeof TestBed.createComponent<ChatSidebarComponent>>;
   let searchMessages: ReturnType<typeof vi.fn>;
   let searchUsers: ReturnType<typeof vi.fn>;
+  const messageEdits = new Subject<PersistedMessage>();
+  const messageDeletes = new Subject<PersistedMessage>();
   let responses: Subject<{ results: ReturnType<typeof searchResult>[]; page: number; pageSize: number; hasMore: boolean }>[];
 
   function searchResult(messageId: number, content = 'matching message') {
@@ -48,6 +52,10 @@ describe('ChatSidebarComponent', () => {
       providers: [
         { provide: UsersApiService, useValue: { searchUsers } },
         { provide: ConversationsApiService, useValue: { searchMessages } },
+        { provide: ChatService, useValue: {
+          messageEdits$: messageEdits.asObservable(),
+          messageDeletes$: messageDeletes.asObservable(),
+        } },
       ],
     }).compileComponents();
 
@@ -180,6 +188,43 @@ describe('ChatSidebarComponent', () => {
 
     expect(fixture.nativeElement.textContent).toContain('matching message');
     expect(fixture.nativeElement.textContent).toContain('bob');
+  });
+
+  it('removes deleted hits and refreshes active search results after edits', async () => {
+    vi.useFakeTimers();
+    await openMessageSearch();
+    fixture.componentInstance.searchMessages('match');
+    await vi.advanceTimersByTimeAsync(300);
+    emitPage(0, [11], 1, false);
+    expect(fixture.componentInstance.messageSearchResults().map((result) => result.messageId)).toEqual([11]);
+
+    messageDeletes.next({
+      id: 11,
+      conversationId: 42,
+      senderId: 'user-b',
+      content: '',
+      createdAt: '2026-10-11T12:00:00Z',
+      deletedAt: '2026-10-13T12:01:00Z',
+      isDeleted: true,
+      deliveredAt: null,
+      readAt: null,
+    });
+    expect(fixture.componentInstance.messageSearchResults()).toEqual([]);
+
+    messageEdits.next({
+      id: 12,
+      conversationId: 42,
+      senderId: 'user-b',
+      content: 'match after edit',
+      createdAt: '2026-10-11T12:02:00Z',
+      editedAt: '2026-10-13T12:02:00Z',
+      deliveredAt: null,
+      readAt: null,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(searchMessages).toHaveBeenCalledTimes(2);
+    emitPage(1, [12], 1, false, 'match after edit');
+    expect(fixture.componentInstance.messageSearchResults().map((result) => result.messageId)).toEqual([12]);
   });
 
   it('submits immediately with Enter and safely highlights matching text', async () => {

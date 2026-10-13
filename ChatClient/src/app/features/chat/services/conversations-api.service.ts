@@ -4,6 +4,7 @@ import { Observable } from 'rxjs';
 import {
   ConversationSummary,
   MessagePage,
+  PersistedMessage,
   MessageSearchPage,
   OpenConversation,
 } from '../models/conversation.model';
@@ -33,6 +34,19 @@ export class ConversationsApiService {
   getMessageContext(conversationId: number, messageId: number): Observable<MessagePage> {
     return this.http.get<MessagePage>(
       `${this.baseUrl}/${conversationId}/messages/${messageId}/context`,
+    );
+  }
+
+  editMessage(conversationId: number, messageId: number, content: string): Observable<PersistedMessage> {
+    return this.http.put<PersistedMessage>(
+      `${this.baseUrl}/${conversationId}/messages/${messageId}`,
+      { content },
+    );
+  }
+
+  deleteMessage(conversationId: number, messageId: number): Observable<PersistedMessage> {
+    return this.http.delete<PersistedMessage>(
+      `${this.baseUrl}/${conversationId}/messages/${messageId}`,
     );
   }
 

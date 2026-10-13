@@ -1,8 +1,10 @@
 using ChatApi.DTOs.Conversations;
+using ChatApi.Hubs;
 using ChatApi.Services.Conversations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 
 namespace ChatApi.Controllers;
 
@@ -13,13 +15,16 @@ public class ConversationsController : ControllerBase
 {
     private readonly IConversationService _conversationService;
     private readonly UserManager<Models.ApplicationUser> _userManager;
+    private readonly IHubContext<ChatHub> _chatHub;
 
     public ConversationsController(
         IConversationService conversationService,
-        UserManager<Models.ApplicationUser> userManager)
+        UserManager<Models.ApplicationUser> userManager,
+        IHubContext<ChatHub> chatHub)
     {
         _conversationService = conversationService;
         _userManager = userManager;
+        _chatHub = chatHub;
     }
 
     [HttpPost("open/{otherUserId}")]
@@ -135,4 +140,98 @@ public class ConversationsController : ControllerBase
             conversationId, messageId, userId, cancellationToken);
         return page is null ? NotFound() : Ok(page);
     }
+
+    [HttpPut("{conversationId:long}/messages/{messageId:long}")]
+    [ProducesResponseType(typeof(MessageDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<MessageDto>> EditMessage(
+        long conversationId,
+        long messageId,
+        [FromBody] EditMessageRequest request,
+        CancellationToken cancellationToken)
+    {
+        var userId = _userManager.GetUserId(User);
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        if (conversationId <= 0 || messageId <= 0)
+        {
+            return BadRequest(new { error = "Conversation and message IDs must be positive." });
+        }
+
+        MessageMutationResult result;
+        try
+        {
+            result = await _conversationService.EditMessageAsync(
+                conversationId, messageId, userId, request.Content, cancellationToken);
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { error = exception.Message });
+        }
+
+        if (result.Status != MessageMutationStatus.Updated)
+        {
+            return MutationFailure(result.Status);
+        }
+
+        if (result.Changed)
+        {
+            await _chatHub.Clients.Users(userId, result.RecipientId!)
+                .SendAsync("MessageEdited", result.Message, cancellationToken);
+        }
+
+        return Ok(result.Message);
+    }
+
+    [HttpDelete("{conversationId:long}/messages/{messageId:long}")]
+    [ProducesResponseType(typeof(MessageDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<MessageDto>> DeleteMessage(
+        long conversationId,
+        long messageId,
+        CancellationToken cancellationToken)
+    {
+        var userId = _userManager.GetUserId(User);
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        if (conversationId <= 0 || messageId <= 0)
+        {
+            return BadRequest(new { error = "Conversation and message IDs must be positive." });
+        }
+
+        var result = await _conversationService.DeleteMessageAsync(
+            conversationId, messageId, userId, cancellationToken);
+        if (result.Status != MessageMutationStatus.Updated)
+        {
+            return MutationFailure(result.Status);
+        }
+
+        if (result.Changed)
+        {
+            await _chatHub.Clients.Users(userId, result.RecipientId!)
+                .SendAsync("MessageDeleted", result.Message, cancellationToken);
+        }
+
+        return Ok(result.Message);
+    }
+
+    private ActionResult<MessageDto> MutationFailure(MessageMutationStatus status) => status switch
+    {
+        MessageMutationStatus.NotFound => NotFound(),
+        MessageMutationStatus.Forbidden => Forbid(),
+        MessageMutationStatus.AlreadyDeleted => Conflict(new { error = "Deleted messages cannot be edited." }),
+        MessageMutationStatus.Unchanged => BadRequest(new { error = "The message content is unchanged." }),
+        _ => BadRequest()
+    };
 }

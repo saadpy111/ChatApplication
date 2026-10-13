@@ -10,6 +10,8 @@ export class ChatService {
   private readonly authService = inject(AuthService);
   private readonly incomingMessagesSubject = new Subject<PersistedMessage>();
   private readonly messageStatusUpdatesSubject = new Subject<PersistedMessage>();
+  private readonly messageEditsSubject = new Subject<PersistedMessage>();
+  private readonly messageDeletesSubject = new Subject<PersistedMessage>();
   private readonly unreadCountUpdatesSubject = new Subject<UnreadCountUpdate>();
   private readonly reconnectedSubject = new Subject<void>();
   private readonly userTypingSubject = new Subject<UserTypingEvent>();
@@ -25,6 +27,8 @@ export class ChatService {
 
   readonly incomingMessages$ = this.incomingMessagesSubject.asObservable();
   readonly messageStatusUpdates$ = this.messageStatusUpdatesSubject.asObservable();
+  readonly messageEdits$ = this.messageEditsSubject.asObservable();
+  readonly messageDeletes$ = this.messageDeletesSubject.asObservable();
   readonly unreadCountUpdates$ = this.unreadCountUpdatesSubject.asObservable();
   readonly reconnected$ = this.reconnectedSubject.asObservable();
   readonly userTyping$ = this.userTypingSubject.asObservable();
@@ -211,6 +215,16 @@ export class ChatService {
         this.messageStatusUpdatesSubject.next(payload);
       }
     });
+    connection.on('MessageEdited', (payload: unknown) => {
+      if (isPersistedMessage(payload)) {
+        this.messageEditsSubject.next(payload);
+      }
+    });
+    connection.on('MessageDeleted', (payload: unknown) => {
+      if (isPersistedMessage(payload)) {
+        this.messageDeletesSubject.next(payload);
+      }
+    });
     connection.on('UnreadCountUpdated', (payload: unknown) => {
       if (isUnreadCountUpdate(payload)) {
         this.unreadCountUpdatesSubject.next(payload);
@@ -321,6 +335,9 @@ function isPersistedMessage(payload: unknown): payload is PersistedMessage {
     && typeof message.senderId === 'string'
     && typeof message.content === 'string'
     && typeof message.createdAt === 'string'
+    && (message.editedAt === undefined || message.editedAt === null || typeof message.editedAt === 'string')
+    && (message.deletedAt === undefined || message.deletedAt === null || typeof message.deletedAt === 'string')
+    && (message.isDeleted === undefined || typeof message.isDeleted === 'boolean')
     && (message.deliveredAt === null || typeof message.deliveredAt === 'string')
     && (message.readAt === null || typeof message.readAt === 'string');
 }

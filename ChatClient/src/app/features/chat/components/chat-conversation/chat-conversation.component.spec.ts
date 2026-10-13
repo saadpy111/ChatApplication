@@ -10,6 +10,8 @@ describe('ChatConversationComponent composer', () => {
   let typingStarted: number[];
   let typingStopped: number[];
   let readAcknowledgements: { conversationId: number; lastReadMessageId: number }[];
+  let editRequests: { conversationId: number; messageId: number; content: string }[];
+  let deleteRequests: { conversationId: number; messageId: number }[];
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({ imports: [ChatConversationComponent] }).compileComponents();
@@ -19,7 +21,11 @@ describe('ChatConversationComponent composer', () => {
     typingStarted = [];
     typingStopped = [];
     readAcknowledgements = [];
+    editRequests = [];
+    deleteRequests = [];
     component.messageSubmitted.subscribe((request) => sentRequests.push(request));
+    component.messageEditRequested.subscribe((request) => editRequests.push(request));
+    component.messageDeleteRequested.subscribe((request) => deleteRequests.push(request));
     component.typingStarted.subscribe((conversationId) => typingStarted.push(conversationId));
     component.typingStopped.subscribe((conversationId) => typingStopped.push(conversationId));
     component.readAcknowledged.subscribe((request) => readAcknowledgements.push(request));
@@ -251,6 +257,73 @@ describe('ChatConversationComponent composer', () => {
     fixture.detectChanges();
     expect(getTextarea()).toBe(textarea);
     expect(document.activeElement).toBe(textarea);
+  });
+
+  it('offers edit/delete only for owned messages and requires modal confirmation before deleting', async () => {
+    fixture.componentRef.setInput('currentUserId', 'me');
+    fixture.componentRef.setInput('messages', [
+      { id: 21, text: 'Original', senderId: 'me', sentAt: new Date() },
+      { id: 22, text: 'Friend message', senderId: 'friend-id', sentAt: new Date() },
+    ]);
+    fixture.detectChanges();
+    const ownMessage = fixture.nativeElement.querySelector('[data-message-id="21"]') as HTMLElement;
+    const friendMessage = fixture.nativeElement.querySelector('[data-message-id="22"]') as HTMLElement;
+    expect(friendMessage.querySelector('.message-actions')).toBeNull();
+
+    (ownMessage.querySelector('.message-actions button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('textarea[aria-label="Edit message"]')).not.toBeNull();
+    const editTextarea = ownMessage.querySelector('textarea[aria-label="Edit message"]') as HTMLTextAreaElement;
+    editTextarea.value = 'discarded';
+    editTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+    (ownMessage.querySelector('.message-editor-actions button[type="button"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(component.editingMessageId()).toBeNull();
+    expect(editRequests).toEqual([]);
+
+    (ownMessage.querySelector('.message-actions button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const revisedTextarea = ownMessage.querySelector('textarea[aria-label="Edit message"]') as HTMLTextAreaElement;
+    revisedTextarea.value = '  Revised  ';
+    component.editDraft = revisedTextarea.value;
+    component.saveMessageEdit({ id: 21, text: 'Original', senderId: 'me', sentAt: new Date() });
+    expect(editRequests).toEqual([{ conversationId: 42, messageId: 21, content: 'Revised' }]);
+    component.cancelMessageEdit();
+    fixture.detectChanges();
+
+    const dialog = fixture.nativeElement.querySelector('.delete-dialog') as HTMLDialogElement;
+    const showModal = vi.fn(() => dialog.setAttribute('open', ''));
+    const close = vi.fn(() => dialog.removeAttribute('open'));
+    Object.defineProperty(dialog, 'showModal', { configurable: true, value: showModal });
+    Object.defineProperty(dialog, 'close', { configurable: true, value: close });
+    (ownMessage.querySelector('.message-actions button:last-child') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    expect(showModal).toHaveBeenCalledOnce();
+    expect(dialog.textContent).toContain('This action cannot be undone.');
+    expect(deleteRequests).toEqual([]);
+
+    (dialog.querySelector('.dialog-cancel') as HTMLButtonElement).click();
+    expect(deleteRequests).toEqual([]);
+
+    (ownMessage.querySelector('.message-actions button:last-child') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    (dialog.querySelector('.dialog-delete') as HTMLButtonElement).click();
+    expect(deleteRequests).toEqual([{ conversationId: 42, messageId: 21 }]);
+  });
+
+  it('renders deleted messages as placeholders without actions', () => {
+    fixture.componentRef.setInput('currentUserId', 'me');
+    fixture.componentRef.setInput('messages', [{
+      id: 23,
+      text: '',
+      senderId: 'me',
+      sentAt: new Date(),
+      isDeleted: true,
+    }]);
+    fixture.detectChanges();
+    const message = fixture.nativeElement.querySelector('[data-message-id="23"]') as HTMLElement;
+    expect(message.textContent).toContain('Message deleted');
+    expect(message.querySelector('.message-actions')).toBeNull();
   });
 
   it('waits for the target message to render, scrolls the message list, and expires the highlight', () => {

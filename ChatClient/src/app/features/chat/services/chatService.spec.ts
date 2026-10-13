@@ -19,6 +19,8 @@ describe('ChatService', () => {
   let service: ChatService;
   let receiveMessage: ((message: PersistedMessage) => void) | undefined;
   let updateMessageStatus: ((message: PersistedMessage) => void) | undefined;
+  let receiveMessageEdited: ((message: PersistedMessage) => void) | undefined;
+  let receiveMessageDeleted: ((message: PersistedMessage) => void) | undefined;
   let updateUnreadCount: ((update: { conversationId: number; unreadCount: number }) => void) | undefined;
   let userTyping: ((event: { conversationId: number; userId: string; displayName: string }) => void) | undefined;
   let userStoppedTyping: ((event: { conversationId: number; userId: string }) => void) | undefined;
@@ -34,6 +36,8 @@ describe('ChatService', () => {
   beforeEach(() => {
     receiveMessage = undefined;
     updateMessageStatus = undefined;
+    receiveMessageEdited = undefined;
+    receiveMessageDeleted = undefined;
     updateUnreadCount = undefined;
     userTyping = undefined;
     userStoppedTyping = undefined;
@@ -47,6 +51,10 @@ describe('ChatService', () => {
         receiveMessage = handler;
       } else if (eventName === 'MessageStatusUpdated') {
         updateMessageStatus = handler;
+      } else if (eventName === 'MessageEdited') {
+        receiveMessageEdited = handler;
+      } else if (eventName === 'MessageDeleted') {
+        receiveMessageDeleted = handler;
       } else if (eventName === 'UnreadCountUpdated') {
         updateUnreadCount = handler as unknown as (update: { conversationId: number; unreadCount: number }) => void;
       } else if (eventName === 'UserTyping') {
@@ -154,6 +162,23 @@ describe('ChatService', () => {
     updateMessageStatus?.(updatedMessage);
 
     expect(subscriber).toHaveBeenCalledExactlyOnceWith(updatedMessage);
+  });
+
+  it('emits validated message edit and delete events', async () => {
+    const editedSubscriber = vi.fn();
+    const deletedSubscriber = vi.fn();
+    service.messageEdits$.subscribe(editedSubscriber);
+    service.messageDeletes$.subscribe(deletedSubscriber);
+    await service.startConnection();
+    const edited = { ...message, content: 'Updated', editedAt: '2026-10-13T12:00:00Z' };
+    const deleted = { ...message, content: '', isDeleted: true, deletedAt: '2026-10-13T12:01:00Z' };
+
+    receiveMessageEdited?.(edited);
+    receiveMessageEdited?.({ ...edited, content: 4 } as unknown as PersistedMessage);
+    receiveMessageDeleted?.(deleted);
+
+    expect(editedSubscriber).toHaveBeenCalledExactlyOnceWith(edited);
+    expect(deletedSubscriber).toHaveBeenCalledExactlyOnceWith(deleted);
   });
 
   it('emits validated authoritative unread count updates', async () => {

@@ -1,7 +1,7 @@
 import { DatePipe, DOCUMENT } from '@angular/common';
 import { AfterViewChecked, afterNextRender, Component, DestroyRef, ElementRef, inject, Injector, input, OnChanges, output, signal, SimpleChanges, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ChatConnectionStatus, ChatMessage, MessageSendRequest, MessageSendResult } from '../../models/chat-message.model';
+import { ChatConnectionStatus, ChatMessage, MessageActionState, MessageSendRequest, MessageSendResult } from '../../models/chat-message.model';
 import { User } from '../../../users/models/user';
 import { UserPresence } from '../../models/conversation.model';
 
@@ -24,6 +24,8 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   @ViewChild('messageList') private messageList?: ElementRef<HTMLElement>;
   @ViewChild('messageInput') private messageInput?: ElementRef<HTMLTextAreaElement>;
   @ViewChild('sendButton') private sendButton?: ElementRef<HTMLButtonElement>;
+  @ViewChild('deleteDialog') private deleteDialog?: ElementRef<HTMLDialogElement>;
+  @ViewChild('deleteCancelButton') private deleteCancelButton?: ElementRef<HTMLButtonElement>;
 
   readonly friend = input<User | null>(null);
   readonly presence = input<UserPresence | null>(null);
@@ -43,10 +45,13 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   readonly connectionError = input<string | null>(null);
   readonly sending = input(false);
   readonly sendResult = input<MessageSendResult | null>(null);
+  readonly messageActionStates = input<Record<number, MessageActionState>>({});
   readonly currentUserId = input<string | null>(null);
   readonly currentUsername = input('');
   readonly typingUsername = input<string | null>(null);
   readonly messageSubmitted = output<MessageSendRequest>();
+  readonly messageEditRequested = output<{ conversationId: number; messageId: number; content: string }>();
+  readonly messageDeleteRequested = output<{ conversationId: number; messageId: number }>();
   readonly typingStarted = output<number>();
   readonly typingStopped = output<number>();
   readonly loadOlder = output<void>();
@@ -61,6 +66,12 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   }>();
 
   draft = '';
+  editDraft = '';
+  readonly pendingDeleteMessage = signal<ChatMessage | null>(null);
+  readonly editingMessageId = signal<number | null>(null);
+  private editingOriginalEditedAt: string | null = null;
+  private deleteDialogReturnFocus: HTMLElement | null = null;
+  private deleteMessageFocusTarget: HTMLElement | null = null;
   private previousMessageCount = 0;
   private previousHistoryVersion = 0;
   private nearBottom = true;
@@ -86,10 +97,20 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
       this.clearSearchHighlightTimer();
       this.pendingSearchNavigation = null;
       this.activeTypingConversationId = null;
+      if (this.deleteDialog?.nativeElement.open) {
+        this.deleteDialog.nativeElement.close();
+      }
     });
   }
 
   ngOnChanges(changes: SimpleChanges): void {
+    if (changes['messages'] && this.editingMessageId() !== null) {
+      const editingMessage = this.messages().find((message) => message.id === this.editingMessageId());
+      if (!editingMessage || editingMessage.isDeleted
+        || (editingMessage.editedAt ?? null) !== this.editingOriginalEditedAt) {
+        this.cancelMessageEdit();
+      }
+    }
     if (changes['friend'] || changes['conversationId'] || changes['conversationActive']) {
       const conversationId = this.conversationId();
       if (!conversationId || !this.friend() || !this.conversationActive()
@@ -270,6 +291,100 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
     this.pendingSend = { requestId, conversationId, draft: this.draft };
     this.draft = '';
     this.messageSubmitted.emit({ requestId, conversationId, text: message });
+  }
+
+  startMessageEdit(message: ChatMessage): void {
+    if (message.senderId !== this.currentUserId() || message.isDeleted) {
+      return;
+    }
+
+    this.editingMessageId.set(message.id);
+    this.editingOriginalEditedAt = message.editedAt ?? null;
+    this.editDraft = message.text;
+  }
+
+  cancelMessageEdit(): void {
+    this.editingMessageId.set(null);
+    this.editingOriginalEditedAt = null;
+    this.editDraft = '';
+  }
+
+  saveMessageEdit(message: ChatMessage): void {
+    const conversationId = this.conversationId();
+    const content = this.editDraft.trim();
+    if (!conversationId || !content || content.length > 2000
+      || this.messageActionStates()[message.id]?.pending) {
+      return;
+    }
+
+    this.messageEditRequested.emit({ conversationId, messageId: message.id, content });
+  }
+
+  requestMessageDelete(message: ChatMessage, event: MouseEvent): void {
+    const dialog = this.deleteDialog?.nativeElement;
+    if (!this.conversationId() || message.senderId !== this.currentUserId() || message.isDeleted
+      || this.messageActionStates()[message.id]?.pending || this.pendingDeleteMessage() || !dialog) {
+      return;
+    }
+
+    const trigger = event.currentTarget as HTMLElement;
+    this.deleteDialogReturnFocus = trigger;
+    this.deleteMessageFocusTarget = trigger.closest<HTMLElement>('.message');
+    this.pendingDeleteMessage.set(message);
+    afterNextRender({
+      write: () => {
+        if (this.pendingDeleteMessage()?.id !== message.id || dialog.open || !dialog.isConnected) {
+          return;
+        }
+        dialog.showModal();
+        this.deleteCancelButton?.nativeElement.focus({ preventScroll: true });
+      },
+    }, { injector: this.injector });
+  }
+
+  handleDeleteDialogCancel(event: Event): void {
+    event.preventDefault();
+    this.closeDeleteDialog(false);
+  }
+
+  cancelDeleteConfirmation(): void {
+    this.closeDeleteDialog(false);
+  }
+
+  handleDeleteDialogClick(event: MouseEvent): void {
+    if (event.target === event.currentTarget) {
+      this.closeDeleteDialog(false);
+    }
+  }
+
+  confirmMessageDelete(): void {
+    const message = this.pendingDeleteMessage();
+    const conversationId = this.conversationId();
+    if (!message || !conversationId || this.messageActionStates()[message.id]?.pending) {
+      return;
+    }
+
+    this.closeDeleteDialog(true);
+    this.messageDeleteRequested.emit({ conversationId, messageId: message.id });
+  }
+
+  private closeDeleteDialog(confirmed: boolean): void {
+    const dialog = this.deleteDialog?.nativeElement;
+    if (dialog?.open) {
+      dialog.close();
+    }
+
+    this.pendingDeleteMessage.set(null);
+    const focusTarget = confirmed ? this.deleteMessageFocusTarget : this.deleteDialogReturnFocus;
+    this.deleteDialogReturnFocus = null;
+    this.deleteMessageFocusTarget = null;
+    afterNextRender({
+      write: () => {
+        if (focusTarget?.isConnected) {
+          focusTarget.focus({ preventScroll: true });
+        }
+      },
+    }, { injector: this.injector });
   }
 
   handleDraftInput(): void {

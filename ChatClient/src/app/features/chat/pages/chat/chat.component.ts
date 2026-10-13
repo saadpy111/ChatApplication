@@ -1,7 +1,7 @@
 import { Component, DestroyRef, inject, OnInit, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
-import { ChatMessage, MessageSendRequest, MessageSendResult } from '../../models/chat-message.model';
+import { ChatMessage, MessageActionState, MessageSendRequest, MessageSendResult } from '../../models/chat-message.model';
 import {
   ConversationSummary,
   MessagePage,
@@ -34,6 +34,7 @@ export class ChatComponent implements OnInit {
   readonly messages = signal<ChatMessage[]>([]);
   readonly sending = signal(false);
   readonly sendResult = signal<MessageSendResult | null>(null);
+  readonly messageActionStates = signal<Record<number, MessageActionState>>({});
   readonly typingUsername = signal<string | null>(null);
   readonly conversationsLoading = signal(true);
   readonly conversationsError = signal<string | null>(null);
@@ -64,6 +65,12 @@ export class ChatComponent implements OnInit {
     this.chatService.messageStatusUpdates$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((message) => this.updateMessageStatus(message));
+    this.chatService.messageEdits$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((message) => this.applyMessageMutation(message));
+    this.chatService.messageDeletes$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((message) => this.applyMessageMutation(message));
     this.chatService.unreadCountUpdates$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((update) => this.updateUnreadCount(update));
@@ -242,6 +249,46 @@ export class ChatComponent implements OnInit {
     }
   }
 
+  async editMessage(request: { conversationId: number; messageId: number; content: string }): Promise<void> {
+    if (this.selectedConversationId() !== request.conversationId) {
+      return;
+    }
+
+    this.setMessageActionState(request.messageId, { pending: true, error: null });
+    try {
+      const message = await firstValueFrom(this.conversationsApi.editMessage(
+        request.conversationId, request.messageId, request.content,
+      ));
+      this.applyMessageMutation(message);
+      this.setMessageActionState(request.messageId, null);
+    } catch {
+      this.setMessageActionState(request.messageId, {
+        pending: false,
+        error: 'This message could not be edited. Try again.',
+      });
+    }
+  }
+
+  async deleteMessage(request: { conversationId: number; messageId: number }): Promise<void> {
+    if (this.selectedConversationId() !== request.conversationId) {
+      return;
+    }
+
+    this.setMessageActionState(request.messageId, { pending: true, error: null });
+    try {
+      const message = await firstValueFrom(this.conversationsApi.deleteMessage(
+        request.conversationId, request.messageId,
+      ));
+      this.applyMessageMutation(message);
+      this.setMessageActionState(request.messageId, null);
+    } catch {
+      this.setMessageActionState(request.messageId, {
+        pending: false,
+        error: 'This message could not be deleted. Try again.',
+      });
+    }
+  }
+
   private async activateConversation(
     conversationId: number,
     friend: User,
@@ -253,6 +300,7 @@ export class ChatComponent implements OnInit {
     this.selectedConversationId.set(conversationId);
     this.selectedFriend.set(friend);
     this.messages.set([]);
+    this.messageActionStates.set({});
     this.selectedMessageId.set(null);
     this.nextCursor = null;
     this.hasMore.set(false);
@@ -354,7 +402,33 @@ export class ChatComponent implements OnInit {
       return;
     }
 
-    this.messages.update((current) => this.mergeMessages(current, [message]));
+    this.messages.update((current) => current.map((item) => item.id === message.id
+      ? {
+          ...item,
+          deliveredAt: message.deliveredAt ?? item.deliveredAt ?? null,
+          readAt: message.readAt ?? item.readAt ?? null,
+        }
+      : item));
+  }
+
+  private applyMessageMutation(message: PersistedMessage): void {
+    if (this.selectedConversationId() === message.conversationId
+      && this.messages().some((item) => item.id === message.id)) {
+      this.messages.update((current) => this.mergeMessages(current, [message]));
+    }
+    void this.loadConversations();
+  }
+
+  private setMessageActionState(messageId: number, state: MessageActionState | null): void {
+    this.messageActionStates.update((current) => {
+      const next = { ...current };
+      if (state) {
+        next[messageId] = state;
+      } else {
+        delete next[messageId];
+      }
+      return next;
+    });
   }
 
   acknowledgeRead(acknowledgement: { conversationId: number; lastReadMessageId: number }): void {
@@ -504,14 +578,23 @@ export class ChatComponent implements OnInit {
 
     const byId = new Map(current.map((message) => [message.id, message]));
     for (const received of incoming) {
-      const message = this.pendingStatusUpdates.get(received.id) ?? received;
+      const pendingStatus = this.pendingStatusUpdates.get(received.id);
       this.pendingStatusUpdates.delete(received.id);
-      const converted = this.toChatMessage(message, friend);
-      const existing = byId.get(message.id);
-      byId.set(message.id, {
+      const converted = this.toChatMessage(received, friend);
+      const existing = byId.get(received.id);
+      const existingEditedAt = existing?.editedAt ?? null;
+      const receivedEditedAt = converted.editedAt ?? null;
+      const keepExistingEdit = existingEditedAt !== null
+        && (!receivedEditedAt || Date.parse(existingEditedAt) > Date.parse(receivedEditedAt));
+      const isDeleted = existing?.isDeleted === true || converted.isDeleted === true;
+      byId.set(received.id, {
         ...converted,
-        deliveredAt: converted.deliveredAt ?? received.deliveredAt ?? existing?.deliveredAt ?? null,
-        readAt: converted.readAt ?? received.readAt ?? existing?.readAt ?? null,
+        text: isDeleted ? '' : keepExistingEdit ? existing?.text ?? converted.text : converted.text,
+        editedAt: keepExistingEdit ? existing?.editedAt : converted.editedAt,
+        deletedAt: existing?.isDeleted ? existing.deletedAt : converted.deletedAt,
+        isDeleted,
+        deliveredAt: converted.deliveredAt ?? pendingStatus?.deliveredAt ?? existing?.deliveredAt ?? null,
+        readAt: converted.readAt ?? pendingStatus?.readAt ?? existing?.readAt ?? null,
       });
     }
 
@@ -526,6 +609,9 @@ export class ChatComponent implements OnInit {
       text: message.content,
       senderId: message.senderId,
       sentAt: new Date(message.createdAt),
+      editedAt: message.editedAt,
+      deletedAt: message.deletedAt,
+      isDeleted: message.isDeleted ?? Boolean(message.deletedAt),
       deliveredAt: message.deliveredAt,
       readAt: message.readAt,
     };

@@ -2,6 +2,7 @@ using ChatApi.Data;
 using ChatApi.Hubs;
 using ChatApi.Models;
 using ChatApi.Services.Conversations;
+using ChatApi.Services.Presence;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -20,6 +21,7 @@ namespace ChatApi.Tests;
 public sealed class ConversationServiceTests : IAsyncLifetime
 {
     private readonly SqliteConnection _connection = new("Data Source=:memory:");
+    private readonly IPresenceService _presenceService = new TestPresenceService();
     private ApplicationDbContext _dbContext = null!;
     private ConversationService _service = null!;
 
@@ -47,7 +49,7 @@ public sealed class ConversationServiceTests : IAsyncLifetime
             new IdentityErrorDescriber(),
             new ServiceCollection().BuildServiceProvider(),
             NullLogger<UserManager<ApplicationUser>>.Instance);
-        _service = new ConversationService(_dbContext, userManager);
+        _service = new ConversationService(_dbContext, userManager, _presenceService);
     }
 
     public async Task DisposeAsync()
@@ -116,6 +118,98 @@ public sealed class ConversationServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task EditMessageTrimsContentAndEnforcesOwnershipAndValidation()
+    {
+        var conversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
+        Assert.NotNull(conversation);
+        var sent = await _service.SendMessageAsync(
+            conversation.ConversationId, "user-a", "original", CancellationToken.None);
+        Assert.NotNull(sent);
+
+        var edited = await _service.EditMessageAsync(
+            conversation.ConversationId, sent.Value.Message.Id, "user-a", "  revised  ", CancellationToken.None);
+        var unchanged = await _service.EditMessageAsync(
+            conversation.ConversationId, sent.Value.Message.Id, "user-a", "revised", CancellationToken.None);
+        var otherSender = await _service.EditMessageAsync(
+            conversation.ConversationId, sent.Value.Message.Id, "user-b", "intrusion", CancellationToken.None);
+        var outsider = await _service.EditMessageAsync(
+            conversation.ConversationId, sent.Value.Message.Id, "user-c", "intrusion", CancellationToken.None);
+
+        Assert.Equal(MessageMutationStatus.Updated, edited.Status);
+        Assert.Equal("revised", edited.Message!.Content);
+        Assert.NotNull(edited.Message.EditedAt);
+        Assert.Equal("user-b", edited.RecipientId);
+        Assert.True(edited.Changed);
+        var updatedSearch = await _service.SearchMessagesAsync(
+            "user-a", "revised", 1, 20, CancellationToken.None);
+        var oldSearch = await _service.SearchMessagesAsync(
+            "user-a", "original", 1, 20, CancellationToken.None);
+        Assert.Equal("revised", Assert.Single(updatedSearch.Results).Content);
+        Assert.Empty(oldSearch.Results);
+        Assert.Equal(MessageMutationStatus.Unchanged, unchanged.Status);
+        Assert.Equal(MessageMutationStatus.Forbidden, otherSender.Status);
+        Assert.Equal(MessageMutationStatus.NotFound, outsider.Status);
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.EditMessageAsync(
+            conversation.ConversationId, sent.Value.Message.Id, "user-a", "  ", CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.EditMessageAsync(
+            conversation.ConversationId, sent.Value.Message.Id, "user-a",
+            new string('x', Message.MaxContentLength + 1), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task DeleteMessageRedactsContentPreservesReceiptsAndExcludesSearch()
+    {
+        var conversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
+        Assert.NotNull(conversation);
+        var sent = await _service.SendMessageAsync(
+            conversation.ConversationId, "user-a", "private phrase", CancellationToken.None);
+        Assert.NotNull(sent);
+        await _service.MarkMessageAsDeliveredAsync(
+            sent.Value.Message.Id, "user-b", CancellationToken.None);
+        await _service.MarkMessagesAsReadAsync(
+            conversation.ConversationId, sent.Value.Message.Id, "user-b", CancellationToken.None);
+
+        var forbidden = await _service.DeleteMessageAsync(
+            conversation.ConversationId, sent.Value.Message.Id, "user-b", CancellationToken.None);
+        var outsider = await _service.DeleteMessageAsync(
+            conversation.ConversationId, sent.Value.Message.Id, "user-c", CancellationToken.None);
+        var deleted = await _service.DeleteMessageAsync(
+            conversation.ConversationId, sent.Value.Message.Id, "user-a", CancellationToken.None);
+        var repeated = await _service.DeleteMessageAsync(
+            conversation.ConversationId, sent.Value.Message.Id, "user-a", CancellationToken.None);
+
+        Assert.Equal(MessageMutationStatus.Forbidden, forbidden.Status);
+        Assert.Equal(MessageMutationStatus.NotFound, outsider.Status);
+        Assert.Equal(MessageMutationStatus.Updated, deleted.Status);
+        Assert.True(deleted.Changed);
+        Assert.Equal(string.Empty, deleted.Message!.Content);
+        Assert.True(deleted.Message.IsDeleted);
+        Assert.NotNull(deleted.Message.DeletedAt);
+        Assert.False(repeated.Changed);
+        Assert.True(repeated.Message!.IsDeleted);
+
+        var stored = await _dbContext.Messages.SingleAsync();
+        Assert.Equal(string.Empty, stored.Content);
+        Assert.NotNull(stored.DeliveredAt);
+        Assert.NotNull(stored.ReadAt);
+
+        var history = await _service.GetMessagesAsync(
+            conversation.ConversationId, "user-a", 30, null, CancellationToken.None);
+        Assert.True(Assert.Single(history!.Messages).IsDeleted);
+        Assert.Equal(string.Empty, history.Messages[0].Content);
+
+        var context = await _service.GetMessageContextAsync(
+            conversation.ConversationId, sent.Value.Message.Id, "user-b", CancellationToken.None);
+        Assert.True(Assert.Single(context!.Messages).IsDeleted);
+        var search = await _service.SearchMessagesAsync(
+            "user-a", "private phrase", 1, 20, CancellationToken.None);
+        Assert.Empty(search.Results);
+
+        var sidebar = Assert.Single(await _service.GetConversationsAsync("user-a", CancellationToken.None));
+        Assert.Equal("Message deleted", sidebar.LastMessagePreview);
+    }
+
+    [Fact]
     public async Task GetTypingTargetRequiresMembershipAndUsesSenderUsername()
     {
         var conversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
@@ -140,7 +234,7 @@ public sealed class ConversationServiceTests : IAsyncLifetime
         var conversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
         Assert.NotNull(conversation);
         var transport = new RecordingHubTransport();
-        var hub = new ChatHub(_service)
+        var hub = new ChatHub(_service, _presenceService)
         {
             Context = new TestHubCallerContext("user-a"),
             Clients = transport.Clients
@@ -162,7 +256,7 @@ public sealed class ConversationServiceTests : IAsyncLifetime
         Assert.Empty(await _dbContext.Messages.ToListAsync());
 
         var unauthorizedTransport = new RecordingHubTransport();
-        var unauthorizedHub = new ChatHub(_service)
+        var unauthorizedHub = new ChatHub(_service, _presenceService)
         {
             Context = new TestHubCallerContext("user-c"),
             Clients = unauthorizedTransport.Clients
@@ -595,6 +689,18 @@ public sealed class ConversationServiceTests : IAsyncLifetime
     private static T GetPayloadValue<T>(object payload, string propertyName)
     {
         return (T)payload.GetType().GetProperty(propertyName)!.GetValue(payload)!;
+    }
+
+    private sealed class TestPresenceService : IPresenceService
+    {
+        public Task<bool> AddConnectionAsync(string userId, string connectionId, CancellationToken cancellationToken) =>
+            Task.FromResult(false);
+
+        public Task<DateTime?> RemoveConnectionAsync(string userId, string connectionId, CancellationToken cancellationToken) =>
+            Task.FromResult<DateTime?>(null);
+
+        public PresenceSnapshot GetSnapshot(string userId, DateTime? persistedLastSeenAt) =>
+            new(false, persistedLastSeenAt, persistedLastSeenAt);
     }
 
     private sealed class TestHubCallerContext(string userId) : HubCallerContext

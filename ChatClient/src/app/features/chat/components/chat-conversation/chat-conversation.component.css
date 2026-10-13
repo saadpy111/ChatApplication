@@ -39,6 +39,17 @@
 .message-author { color: #c7d2fe; font-size: 11px; font-weight: 650; }
 .message-meta time { color: #a5b4c8; font-size: 10px; }
 .message-body p { margin: 0; color: var(--text); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.message-body .deleted-message { color: var(--muted); font-style: italic; }
+.edited-indicator { display: inline-block; margin-top: 4px; color: var(--muted); font-size: 10px; font-style: italic; }
+.message-actions, .message-editor-actions { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.message-actions button, .message-editor-actions button { padding: 2px 0; border: 0; color: var(--muted); background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
+.message-actions button:hover:not(:disabled), .message-editor-actions button:hover:not(:disabled) { color: var(--text); text-decoration: underline; }
+.message-actions button:disabled, .message-editor-actions button:disabled { cursor: not-allowed; opacity: 0.6; }
+.message-editor { display: grid; gap: 6px; }
+.message-editor textarea { width: min(100%, 520px); min-height: 56px; resize: vertical; padding: 7px; border: 1px solid var(--border); border-radius: 5px; color: var(--text); background: var(--input-bg); font: 14px/1.5 "Segoe UI", sans-serif; }
+.message-editor-actions { justify-content: flex-end; margin-top: 0; }
+.message-editor-actions button[type="submit"] { color: var(--accent); font-weight: 650; }
+.message-action-error { margin-top: 6px !important; color: var(--error) !important; font-size: 11px !important; }
 .message-status { display: block; width: max-content; margin: 3px 0 0 auto; color: #aeb8c5; font-size: 12px; line-height: 1; }
 .message-status.read-receipt { color: #7dd3fc; }
 .composer-wrap { width: min(100%, 1000px); flex: 0 0 auto; margin: 0 auto; padding: 10px clamp(14px, 3vw, 32px) max(14px, env(safe-area-inset-bottom)); background: var(--history-bg); }

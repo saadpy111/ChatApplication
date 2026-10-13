@@ -35,6 +35,9 @@ export interface PersistedMessage {
   senderId: string;
   content: string;
   createdAt: string;
+  editedAt?: string | null;
+  deletedAt?: string | null;
+  isDeleted?: boolean;
   deliveredAt: string | null;
   readAt: string | null;
 }

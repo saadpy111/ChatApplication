@@ -105,11 +105,11 @@ public class ConversationService : IConversationService
                     ? conversation.User2.LastSeenAt
                     : conversation.User1.LastSeenAt,
                 UnreadCount = conversation.Messages.Count(message =>
-                    message.SenderId != userId && message.ReadAt == null),
+                    message.SenderId != userId && message.ReadAt == null && message.DeletedAt == null),
                 LastMessage = conversation.Messages
                     .OrderByDescending(message => message.CreatedAt)
                     .ThenByDescending(message => message.Id)
-                    .Select(message => new { message.Content, message.CreatedAt })
+                    .Select(message => new { message.Content, message.CreatedAt, message.DeletedAt })
                     .FirstOrDefault()
             })
             .OrderByDescending(item => item.LastMessage == null ? item.CreatedAt : item.LastMessage.CreatedAt)
@@ -125,7 +125,9 @@ public class ConversationService : IConversationService
                 ConversationId = item.Id,
                 OtherUserId = item.OtherUserId,
                 OtherUsername = item.OtherUsername ?? string.Empty,
-                LastMessagePreview = item.LastMessage?.Content,
+                LastMessagePreview = item.LastMessage is null
+                    ? null
+                    : item.LastMessage.DeletedAt is null ? item.LastMessage.Content : "Message deleted",
                 LastMessageAt = item.LastMessage is null ? null : SpecifyUtc(item.LastMessage.CreatedAt),
                 CreatedAt = SpecifyUtc(item.CreatedAt),
                 UnreadCount = item.UnreadCount,
@@ -160,7 +162,7 @@ public class ConversationService : IConversationService
     {
         return _dbContext.Messages
             .Where(message => message.ConversationId == conversationId &&
-                message.SenderId != userId && message.ReadAt == null &&
+                message.SenderId != userId && message.ReadAt == null && message.DeletedAt == null &&
                 (message.Conversation.User1Id == userId || message.Conversation.User2Id == userId))
             .CountAsync(cancellationToken);
     }
@@ -240,6 +242,8 @@ public class ConversationService : IConversationService
                 message.SenderId,
                 message.Content,
                 message.CreatedAt,
+                message.EditedAt,
+                message.DeletedAt,
                 message.DeliveredAt,
                 message.ReadAt
             })
@@ -256,8 +260,11 @@ public class ConversationService : IConversationService
             Id = message.Id,
             ConversationId = message.ConversationId,
             SenderId = message.SenderId,
-            Content = message.Content,
+            Content = message.DeletedAt is null ? message.Content : string.Empty,
             CreatedAt = DateTime.SpecifyKind(message.CreatedAt, DateTimeKind.Utc),
+            EditedAt = message.EditedAt is null ? null : DateTime.SpecifyKind(message.EditedAt.Value, DateTimeKind.Utc),
+            DeletedAt = message.DeletedAt is null ? null : DateTime.SpecifyKind(message.DeletedAt.Value, DateTimeKind.Utc),
+            IsDeleted = message.DeletedAt is not null,
             DeliveredAt = message.DeliveredAt is null
                 ? null
                 : DateTime.SpecifyKind(message.DeliveredAt.Value, DateTimeKind.Utc),
@@ -305,8 +312,11 @@ public class ConversationService : IConversationService
                 Id = message.Id,
                 ConversationId = message.ConversationId,
                 SenderId = message.SenderId,
-                Content = message.Content,
+                Content = message.DeletedAt != null ? string.Empty : message.Content,
                 CreatedAt = DateTime.SpecifyKind(message.CreatedAt, DateTimeKind.Utc),
+                EditedAt = message.EditedAt == null ? null : DateTime.SpecifyKind(message.EditedAt.Value, DateTimeKind.Utc),
+                DeletedAt = message.DeletedAt == null ? null : DateTime.SpecifyKind(message.DeletedAt.Value, DateTimeKind.Utc),
+                IsDeleted = message.DeletedAt != null,
                 DeliveredAt = message.DeliveredAt == null
                     ? null
                     : DateTime.SpecifyKind(message.DeliveredAt.Value, DateTimeKind.Utc),
@@ -336,8 +346,11 @@ public class ConversationService : IConversationService
                 Id = message.Id,
                 ConversationId = message.ConversationId,
                 SenderId = message.SenderId,
-                Content = message.Content,
+                Content = message.DeletedAt != null ? string.Empty : message.Content,
                 CreatedAt = DateTime.SpecifyKind(message.CreatedAt, DateTimeKind.Utc),
+                EditedAt = message.EditedAt == null ? null : DateTime.SpecifyKind(message.EditedAt.Value, DateTimeKind.Utc),
+                DeletedAt = message.DeletedAt == null ? null : DateTime.SpecifyKind(message.DeletedAt.Value, DateTimeKind.Utc),
+                IsDeleted = message.DeletedAt != null,
                 DeliveredAt = message.DeliveredAt == null
                     ? null
                     : DateTime.SpecifyKind(message.DeliveredAt.Value, DateTimeKind.Utc),
@@ -387,6 +400,7 @@ public class ConversationService : IConversationService
             .AsNoTracking()
             .Where(message =>
                 (message.Conversation.User1Id == userId || message.Conversation.User2Id == userId) &&
+                message.DeletedAt == null &&
                 EF.Functions.Like(message.Content, pattern, "~"))
             .OrderByDescending(message => message.CreatedAt)
             .ThenByDescending(message => message.Id)
@@ -467,6 +481,118 @@ public class ConversationService : IConversationService
             ReadAt = message.ReadAt
         }, conversation.User1Id == senderId ? conversation.User2Id : conversation.User1Id);
     }
+
+    public async Task<MessageMutationResult> EditMessageAsync(
+        long conversationId,
+        long messageId,
+        string senderId,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        content = content?.Trim() ?? string.Empty;
+        if (content.Length is < 1 or > Message.MaxContentLength)
+        {
+            throw new ArgumentException(
+                $"Message content must contain between 1 and {Message.MaxContentLength} characters.",
+                nameof(content));
+        }
+
+        var message = await FindMessageForMutationAsync(
+            conversationId, messageId, senderId, cancellationToken);
+        if (message is null)
+        {
+            return new MessageMutationResult(MessageMutationStatus.NotFound);
+        }
+
+        if (message.SenderId != senderId)
+        {
+            return new MessageMutationResult(MessageMutationStatus.Forbidden);
+        }
+
+        if (message.DeletedAt is not null)
+        {
+            return new MessageMutationResult(MessageMutationStatus.AlreadyDeleted);
+        }
+
+        if (string.Equals(message.Content, content, StringComparison.Ordinal))
+        {
+            return new MessageMutationResult(MessageMutationStatus.Unchanged);
+        }
+
+        var editedAt = DateTime.UtcNow;
+        var changed = await _dbContext.Messages
+            .Where(item => item.Id == messageId && item.ConversationId == conversationId &&
+                item.SenderId == senderId && item.DeletedAt == null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.Content, content)
+                .SetProperty(item => item.EditedAt, editedAt), cancellationToken);
+        await _dbContext.Entry(message).ReloadAsync(cancellationToken);
+
+        if (message.DeletedAt is not null)
+        {
+            return new MessageMutationResult(MessageMutationStatus.AlreadyDeleted);
+        }
+
+        if (changed == 0)
+        {
+            return new MessageMutationResult(MessageMutationStatus.NotFound);
+        }
+
+        return new MessageMutationResult(
+            MessageMutationStatus.Updated,
+            ToMessageDto(message),
+            GetOtherParticipantId(message.Conversation, senderId),
+            Changed: true);
+    }
+
+    public async Task<MessageMutationResult> DeleteMessageAsync(
+        long conversationId,
+        long messageId,
+        string senderId,
+        CancellationToken cancellationToken)
+    {
+        var message = await FindMessageForMutationAsync(
+            conversationId, messageId, senderId, cancellationToken);
+        if (message is null)
+        {
+            return new MessageMutationResult(MessageMutationStatus.NotFound);
+        }
+
+        if (message.SenderId != senderId)
+        {
+            return new MessageMutationResult(MessageMutationStatus.Forbidden);
+        }
+
+        var deletedAt = DateTime.UtcNow;
+        var changed = await _dbContext.Messages
+            .Where(item => item.Id == messageId && item.ConversationId == conversationId &&
+                item.SenderId == senderId && item.DeletedAt == null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.Content, string.Empty)
+                .SetProperty(item => item.DeletedAt, deletedAt), cancellationToken);
+        await _dbContext.Entry(message).ReloadAsync(cancellationToken);
+
+        return new MessageMutationResult(
+            MessageMutationStatus.Updated,
+            ToMessageDto(message),
+            GetOtherParticipantId(message.Conversation, senderId),
+            Changed: changed > 0);
+    }
+
+    private Task<Message?> FindMessageForMutationAsync(
+        long conversationId,
+        long messageId,
+        string userId,
+        CancellationToken cancellationToken) =>
+        _dbContext.Messages
+            .Include(message => message.Conversation)
+            .SingleOrDefaultAsync(message => message.Id == messageId &&
+                message.ConversationId == conversationId &&
+                (message.Conversation.User1Id == userId || message.Conversation.User2Id == userId),
+                cancellationToken);
+
+    private static string GetOtherParticipantId(Conversation conversation, string userId) =>
+        conversation.User1Id == userId ? conversation.User2Id : conversation.User1Id;
 
     public async Task<(MessageDto Message, string SenderId)?> MarkMessageAsDeliveredAsync(
         long messageId,
@@ -564,8 +690,11 @@ public class ConversationService : IConversationService
         Id = message.Id,
         ConversationId = message.ConversationId,
         SenderId = message.SenderId,
-        Content = message.Content,
+        Content = message.DeletedAt is null ? message.Content : string.Empty,
         CreatedAt = DateTime.SpecifyKind(message.CreatedAt, DateTimeKind.Utc),
+        EditedAt = message.EditedAt is null ? null : DateTime.SpecifyKind(message.EditedAt.Value, DateTimeKind.Utc),
+        DeletedAt = message.DeletedAt is null ? null : DateTime.SpecifyKind(message.DeletedAt.Value, DateTimeKind.Utc),
+        IsDeleted = message.DeletedAt is not null,
         DeliveredAt = message.DeliveredAt is null
             ? null
             : DateTime.SpecifyKind(message.DeliveredAt.Value, DateTimeKind.Utc),

@@ -3,6 +3,9 @@ export interface ChatMessage {
   text: string;
   senderId: string;
   sentAt: Date;
+  editedAt?: string | null;
+  deletedAt?: string | null;
+  isDeleted?: boolean;
   deliveredAt?: string | null;
   readAt?: string | null;
 }
@@ -19,4 +22,9 @@ export interface MessageSendResult {
   requestId: number;
   conversationId: number;
   succeeded: boolean;
+}
+
+export interface MessageActionState {
+  pending: boolean;
+  error: string | null;
 }
