@@ -8,6 +8,8 @@
 
 A one-to-one chat application built with an ASP.NET Core Web API and an Angular client. It combines authenticated conversation and message APIs with SignalR for real-time messaging, presence, typing indicators, reactions, and delivery/read updates.
 
+**Live Demo:** [Try it here](https://chatapi11.runasp.net/)
+
 > Feature and configuration details below were checked against the repository source. The application, builds, and tests were not run as part of this documentation update.
 
 ## Contents
