@@ -52,6 +52,20 @@ textarea:focus-visible {
 .dialog-delete { color: #fff !important; background: #b91c1c; }
 .dialog-delete:hover { background: #991b1b; }
 
+app-chat-conversation .message { position: relative; }
+app-chat-conversation .message-body { position: relative; }
+app-chat-conversation .reaction-row { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 7px; }
+app-chat-conversation .reaction-badge { display: inline-flex; min-width: 30px; min-height: 27px; align-items: center; justify-content: center; gap: 5px; padding: 2px 7px; border: 1px solid var(--border); border-radius: 14px; color: var(--text); background: var(--surface); font: inherit; font-size: 12px; cursor: pointer; }
+app-chat-conversation .reaction-badge.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
+app-chat-conversation .reaction-add { position: absolute; z-index: 1; top: 50%; right: -30px; display: inline-grid; width: 24px; min-width: 24px; height: 24px; place-items: center; padding: 0; transform: translateY(-50%); border: 1px solid var(--border); border-radius: 50%; color: var(--text); background: var(--surface); font-size: 12px; line-height: 1; cursor: pointer; touch-action: manipulation; }
+app-chat-conversation .reaction-add::before { position: absolute; inset: -4px; content: ''; }
+app-chat-conversation .reaction-add:hover:not(:disabled) { border-color: var(--accent); background: var(--sent-bubble-hover); }
+app-chat-conversation .reaction-add:disabled { cursor: wait; opacity: 0.6; }
+app-chat-conversation .reaction-picker { position: fixed; inset: auto; z-index: 1; display: flex; gap: 4px; max-width: calc(100vw - 20px); margin: 0; padding: 5px; overflow: visible; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--sidebar-bg); box-shadow: 0 8px 24px rgb(0 0 0 / 28%); }
+app-chat-conversation .reaction-picker button { display: grid; width: 38px; min-width: 38px; height: 38px; place-items: center; padding: 0; border: 0; border-radius: 5px; color: inherit; background: transparent; font: inherit; font-size: 20px; cursor: pointer; touch-action: manipulation; }
+app-chat-conversation .reaction-picker button:hover { background: var(--sent-bubble-hover); }
+app-chat-conversation .reaction-badge:focus-visible, app-chat-conversation .reaction-add:focus-visible, app-chat-conversation .reaction-picker button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 @media (max-width: 767px) {
 	.delete-dialog { padding: 20px; }
 	.delete-dialog-actions { gap: 8px; }

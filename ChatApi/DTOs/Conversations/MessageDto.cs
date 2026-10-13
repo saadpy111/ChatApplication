@@ -12,4 +12,5 @@ public class MessageDto
     public bool IsDeleted { get; init; }
     public DateTime? DeliveredAt { get; init; }
     public DateTime? ReadAt { get; init; }
+    public IReadOnlyList<ReactionDto> Reactions { get; init; } = [];
 }

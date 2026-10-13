@@ -2,7 +2,7 @@ import { inject, Injectable, signal } from '@angular/core';
 import { HubConnection, HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr';
 import { Subject } from 'rxjs';
 import { AuthService } from '../../../core/services/auth.service';
-import { ConversationSummary, PersistedMessage, UnreadCountUpdate, UserPresence } from '../models/conversation.model';
+import { ConversationSummary, MessageReactionUpdate, PersistedMessage, UnreadCountUpdate, UserPresence } from '../models/conversation.model';
 import { ChatConnectionStatus } from '../models/chat-message.model';
 
 @Injectable({ providedIn: 'root' })
@@ -17,6 +17,7 @@ export class ChatService {
   private readonly userTypingSubject = new Subject<UserTypingEvent>();
   private readonly userStoppedTypingSubject = new Subject<UserStoppedTypingEvent>();
   private readonly connectionLostSubject = new Subject<void>();
+  private readonly messageReactionUpdatesSubject = new Subject<MessageReactionUpdate>();
   private readonly pendingAcknowledgements = new Map<string, { method: string; args: unknown[] }>();
   private readonly acknowledgementAttempts = new Map<string, Promise<void>>();
   private readonly completedAcknowledgements = new Set<string>();
@@ -34,9 +35,10 @@ export class ChatService {
   readonly userTyping$ = this.userTypingSubject.asObservable();
   readonly userStoppedTyping$ = this.userStoppedTypingSubject.asObservable();
   readonly connectionLost$ = this.connectionLostSubject.asObservable();
+  readonly messageReactionUpdates$ = this.messageReactionUpdatesSubject.asObservable();
   readonly status = signal<ChatConnectionStatus>('disconnected');
   readonly error = signal<string | null>(null);
-  readonly presenceByUserId = signal<Record<string, UserPresence>>({});
+  readonly presenceByUserId = signal<Record<string, UserPresence>>({})
 
   setConversationPresence(conversations: ConversationSummary[]): void {
     for (const conversation of conversations) {
@@ -122,6 +124,15 @@ export class ChatService {
     }
 
     this.processPendingDeliveryReconciliation();
+  }
+
+  async reactToMessage(conversationId: number, messageId: number, emoji: string): Promise<void> {
+    const connection = this.hubConnection;
+    if (!connection || connection.state !== HubConnectionState.Connected) {
+      throw new Error('The chat connection is not available.');
+    }
+
+    await connection.invoke('ReactToMessage', conversationId, messageId, emoji);
   }
 
   private queueAcknowledgement(key: string, method: string, args: unknown[]): void {
@@ -248,6 +259,11 @@ export class ChatService {
     connection.on('UserOffline', (payload: unknown) => {
       if (isPresenceUpdate(payload)) {
         this.applyPresenceUpdate(payload);
+      }
+    });
+    connection.on('MessageReactionUpdated', (payload: unknown) => {
+      if (isMessageReactionUpdate(payload)) {
+        this.messageReactionUpdatesSubject.next(payload);
       }
     });
     connection.onreconnecting(() => {
@@ -390,4 +406,14 @@ function isPresenceUpdate(payload: unknown): payload is PresenceUpdate {
     && typeof payload['changedAt'] === 'string'
     && Number.isFinite(Date.parse(payload['changedAt']))
     && (payload['lastSeenAt'] === null || Number.isFinite(Date.parse(payload['lastSeenAt'])));
+}
+
+function isMessageReactionUpdate(payload: unknown): payload is MessageReactionUpdate {
+  if (!isRecord(payload)) {
+    return false;
+  }
+
+  return isConversationId(payload['conversationId'])
+    && isConversationId(payload['messageId'])
+    && Array.isArray(payload['reactions']);
 }

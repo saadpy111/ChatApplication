@@ -123,6 +123,43 @@
                   </button>
                 </div>
               }
+              @if (!message.isDeleted) {
+                <div class="reaction-row">
+                  @for (reaction of message.reactions; track reaction.emoji) {
+                    <button
+                      class="reaction-badge"
+                      [class.selected]="reaction.reactedByCurrentUser"
+                      type="button"
+                      [disabled]="reactionActionStates()[message.id]?.pending ?? false"
+                      [attr.aria-pressed]="reaction.reactedByCurrentUser"
+                      [attr.aria-label]="reaction.emoji + ', ' + reaction.count + ' reactions'"
+                      (click)="requestReaction(message, reaction.emoji)"
+                    ><span>{{ reaction.emoji }}</span><span>{{ reaction.count }}</span></button>
+                  }
+                </div>
+                @if (message.senderId !== currentUserId()) {
+                  <button
+                    #reactionTrigger
+                    class="reaction-add"
+                    type="button"
+                    aria-label="Add reaction"
+                    title="Add reaction"
+                    [disabled]="reactionActionStates()[message.id]?.pending ?? false"
+                    [attr.aria-expanded]="openReactionPickerMessageId() === message.id"
+                    (click)="toggleReactionPicker(message.id, $event)"
+                  >+</button>
+                  @if (openReactionPickerMessageId() === message.id) {
+                    <div #reactionPicker class="reaction-picker" popover="auto" role="group" aria-label="Choose a reaction" (toggle)="handleReactionPickerToggle($event)">
+                      @for (emoji of supportedReactions; track emoji) {
+                        <button type="button" [attr.aria-label]="'React with ' + emoji" [title]="emoji" (click)="requestReaction(message, emoji)">{{ emoji }}</button>
+                      }
+                    </div>
+                  }
+                }
+                @if (reactionActionStates()[message.id]?.error; as reactionError) {
+                  <p class="message-action-error" role="alert">{{ reactionError }}</p>
+                }
+              }
               @if (messageActionStates()[message.id]?.error; as actionError) {
                 <p class="message-action-error" role="alert">{{ actionError }}</p>
               }

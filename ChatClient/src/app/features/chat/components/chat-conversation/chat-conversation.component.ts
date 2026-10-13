@@ -26,6 +26,7 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   @ViewChild('sendButton') private sendButton?: ElementRef<HTMLButtonElement>;
   @ViewChild('deleteDialog') private deleteDialog?: ElementRef<HTMLDialogElement>;
   @ViewChild('deleteCancelButton') private deleteCancelButton?: ElementRef<HTMLButtonElement>;
+  @ViewChild('reactionPicker') private reactionPicker?: ElementRef<HTMLElement>;
 
   readonly friend = input<User | null>(null);
   readonly presence = input<UserPresence | null>(null);
@@ -46,12 +47,14 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   readonly sending = input(false);
   readonly sendResult = input<MessageSendResult | null>(null);
   readonly messageActionStates = input<Record<number, MessageActionState>>({});
+  readonly reactionActionStates = input<Record<number, MessageActionState>>({});
   readonly currentUserId = input<string | null>(null);
   readonly currentUsername = input('');
   readonly typingUsername = input<string | null>(null);
   readonly messageSubmitted = output<MessageSendRequest>();
   readonly messageEditRequested = output<{ conversationId: number; messageId: number; content: string }>();
   readonly messageDeleteRequested = output<{ conversationId: number; messageId: number }>();
+  readonly reactionRequested = output<{ conversationId: number; messageId: number; emoji: string }>();
   readonly typingStarted = output<number>();
   readonly typingStopped = output<number>();
   readonly loadOlder = output<void>();
@@ -69,6 +72,10 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   editDraft = '';
   readonly pendingDeleteMessage = signal<ChatMessage | null>(null);
   readonly editingMessageId = signal<number | null>(null);
+  readonly openReactionPickerMessageId = signal<number | null>(null);
+  readonly supportedReactions = ['👍', '❤️', '😂', '😮', '😢', '🙏'] as const;
+  private reactionPickerAnchor: HTMLElement | null = null;
+  private readonly repositionReactionPicker = (): void => this.positionReactionPicker();
   private editingOriginalEditedAt: string | null = null;
   private deleteDialogReturnFocus: HTMLElement | null = null;
   private deleteMessageFocusTarget: HTMLElement | null = null;
@@ -97,6 +104,7 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
       this.clearSearchHighlightTimer();
       this.pendingSearchNavigation = null;
       this.activeTypingConversationId = null;
+      this.closeReactionPicker();
       if (this.deleteDialog?.nativeElement.open) {
         this.deleteDialog.nativeElement.close();
       }
@@ -124,6 +132,7 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
       }
     }
     if (changes['conversationId']) {
+      this.closeReactionPicker();
       this.readObserver?.disconnect();
       this.readObserver = null;
       this.observedMessages.clear();
@@ -318,6 +327,97 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
     }
 
     this.messageEditRequested.emit({ conversationId, messageId: message.id, content });
+  }
+
+  toggleReactionPicker(messageId: number, event: MouseEvent): void {
+    if (this.openReactionPickerMessageId() === messageId) {
+      this.closeReactionPicker();
+      return;
+    }
+
+    this.openReactionPickerMessageId.set(messageId);
+    this.reactionPickerAnchor = event.currentTarget as HTMLElement;
+    afterNextRender({
+      write: () => {
+        const picker = this.reactionPicker?.nativeElement;
+        if (!picker || !this.reactionPickerAnchor?.isConnected) {
+          this.closeReactionPicker();
+          return;
+        }
+
+        picker.showPopover();
+        this.positionReactionPicker();
+        const window = this.document.defaultView;
+        window?.addEventListener('scroll', this.repositionReactionPicker, true);
+        window?.addEventListener('resize', this.repositionReactionPicker);
+      },
+    }, { injector: this.injector });
+  }
+
+  handleReactionPickerToggle(event: Event): void {
+    if ((event as ToggleEvent).newState === 'closed'
+      && event.currentTarget === this.reactionPicker?.nativeElement) {
+      this.openReactionPickerMessageId.set(null);
+      this.reactionPickerAnchor = null;
+      this.removeReactionPickerListeners();
+    }
+  }
+
+  private positionReactionPicker(): void {
+    const picker = this.reactionPicker?.nativeElement;
+    const anchor = this.reactionPickerAnchor;
+    const window = this.document.defaultView;
+    if (!picker || !anchor?.isConnected || !window || !picker.matches(':popover-open')) {
+      return;
+    }
+
+    const anchorRect = anchor.getBoundingClientRect();
+    const pickerRect = picker.getBoundingClientRect();
+    const gutter = 10;
+    const maxLeft = Math.max(gutter, window.innerWidth - pickerRect.width - gutter);
+    const left = Math.max(gutter, Math.min(
+      anchorRect.left + anchorRect.width / 2 - pickerRect.width / 2,
+      maxLeft,
+    ));
+    const above = anchorRect.top - pickerRect.height - 8;
+    const below = anchorRect.bottom + 8;
+    const top = above >= gutter
+      ? above
+      : below + pickerRect.height <= window.innerHeight - gutter
+        ? below
+        : Math.max(gutter, Math.min(
+          anchorRect.top + anchorRect.height / 2 - pickerRect.height / 2,
+          window.innerHeight - pickerRect.height - gutter,
+        ));
+
+    picker.style.left = `${left}px`;
+    picker.style.top = `${top}px`;
+  }
+
+  private closeReactionPicker(): void {
+    const picker = this.reactionPicker?.nativeElement;
+    if (picker?.matches(':popover-open')) {
+      picker.hidePopover();
+    }
+    this.openReactionPickerMessageId.set(null);
+    this.reactionPickerAnchor = null;
+    this.removeReactionPickerListeners();
+  }
+
+  private removeReactionPickerListeners(): void {
+    const window = this.document.defaultView;
+    window?.removeEventListener('scroll', this.repositionReactionPicker, true);
+    window?.removeEventListener('resize', this.repositionReactionPicker);
+  }
+
+  requestReaction(message: ChatMessage, emoji: string): void {
+    const conversationId = this.conversationId();
+    if (!conversationId || message.isDeleted || this.reactionActionStates()[message.id]?.pending) {
+      return;
+    }
+
+    this.closeReactionPicker();
+    this.reactionRequested.emit({ conversationId, messageId: message.id, emoji });
   }
 
   requestMessageDelete(message: ChatMessage, event: MouseEvent): void {

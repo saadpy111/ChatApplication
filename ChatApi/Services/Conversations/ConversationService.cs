@@ -245,7 +245,11 @@ public class ConversationService : IConversationService
                 message.EditedAt,
                 message.DeletedAt,
                 message.DeliveredAt,
-                message.ReadAt
+                message.ReadAt,
+                Reactions = message.Reactions
+                    .GroupBy(r => r.Emoji)
+                    .Select(g => new { Emoji = g.Key, Count = g.Count(), UserIds = g.Select(r => r.UserId).ToList() })
+                    .ToList()
             })
             .ToListAsync(cancellationToken);
 
@@ -270,7 +274,15 @@ public class ConversationService : IConversationService
                 : DateTime.SpecifyKind(message.DeliveredAt.Value, DateTimeKind.Utc),
             ReadAt = message.ReadAt is null
                 ? null
-                : DateTime.SpecifyKind(message.ReadAt.Value, DateTimeKind.Utc)
+                : DateTime.SpecifyKind(message.ReadAt.Value, DateTimeKind.Utc),
+            Reactions = message.DeletedAt is null
+                ? message.Reactions.Select(r => new ReactionDto
+                    {
+                        Emoji = r.Emoji,
+                        Count = r.Count,
+                        ReactedByCurrentUser = r.UserIds.Contains(userId)
+                    }).ToList()
+                : []
         }).ToList();
         messages.Reverse();
         return new MessagePageDto
@@ -307,22 +319,21 @@ public class ConversationService : IConversationService
             .OrderByDescending(message => message.CreatedAt)
             .ThenByDescending(message => message.Id)
             .Take(MessageContextPageSize / 2 + 1)
-            .Select(message => new MessageDto
+            .Select(message => new
             {
-                Id = message.Id,
-                ConversationId = message.ConversationId,
-                SenderId = message.SenderId,
+                message.Id,
+                message.ConversationId,
+                message.SenderId,
                 Content = message.DeletedAt != null ? string.Empty : message.Content,
-                CreatedAt = DateTime.SpecifyKind(message.CreatedAt, DateTimeKind.Utc),
-                EditedAt = message.EditedAt == null ? null : DateTime.SpecifyKind(message.EditedAt.Value, DateTimeKind.Utc),
-                DeletedAt = message.DeletedAt == null ? null : DateTime.SpecifyKind(message.DeletedAt.Value, DateTimeKind.Utc),
-                IsDeleted = message.DeletedAt != null,
-                DeliveredAt = message.DeliveredAt == null
-                    ? null
-                    : DateTime.SpecifyKind(message.DeliveredAt.Value, DateTimeKind.Utc),
-                ReadAt = message.ReadAt == null
-                    ? null
-                    : DateTime.SpecifyKind(message.ReadAt.Value, DateTimeKind.Utc)
+                message.CreatedAt,
+                message.EditedAt,
+                message.DeletedAt,
+                message.DeliveredAt,
+                message.ReadAt,
+                Reactions = message.Reactions
+                    .GroupBy(r => r.Emoji)
+                    .Select(g => new { Emoji = g.Key, Count = g.Count(), UserIds = g.Select(r => r.UserId).ToList() })
+                    .ToList()
             })
             .ToListAsync(cancellationToken);
 
@@ -341,25 +352,48 @@ public class ConversationService : IConversationService
             .OrderBy(message => message.CreatedAt)
             .ThenBy(message => message.Id)
             .Take(MessageContextPageSize - MessageContextPageSize / 2)
-            .Select(message => new MessageDto
+            .Select(message => new
             {
-                Id = message.Id,
-                ConversationId = message.ConversationId,
-                SenderId = message.SenderId,
+                message.Id,
+                message.ConversationId,
+                message.SenderId,
                 Content = message.DeletedAt != null ? string.Empty : message.Content,
-                CreatedAt = DateTime.SpecifyKind(message.CreatedAt, DateTimeKind.Utc),
-                EditedAt = message.EditedAt == null ? null : DateTime.SpecifyKind(message.EditedAt.Value, DateTimeKind.Utc),
-                DeletedAt = message.DeletedAt == null ? null : DateTime.SpecifyKind(message.DeletedAt.Value, DateTimeKind.Utc),
-                IsDeleted = message.DeletedAt != null,
-                DeliveredAt = message.DeliveredAt == null
-                    ? null
-                    : DateTime.SpecifyKind(message.DeliveredAt.Value, DateTimeKind.Utc),
-                ReadAt = message.ReadAt == null
-                    ? null
-                    : DateTime.SpecifyKind(message.ReadAt.Value, DateTimeKind.Utc)
+                message.CreatedAt,
+                message.EditedAt,
+                message.DeletedAt,
+                message.DeliveredAt,
+                message.ReadAt,
+                Reactions = message.Reactions
+                    .GroupBy(r => r.Emoji)
+                    .Select(g => new { Emoji = g.Key, Count = g.Count(), UserIds = g.Select(r => r.UserId).ToList() })
+                    .ToList()
             })
             .ToListAsync(cancellationToken);
-        var messages = beforeTarget.AsEnumerable().Reverse().Concat(fromTarget).ToList();
+        var messages = beforeTarget.AsEnumerable().Reverse().Concat(fromTarget).Select(message => new MessageDto
+        {
+            Id = message.Id,
+            ConversationId = message.ConversationId,
+            SenderId = message.SenderId,
+            Content = message.Content,
+            CreatedAt = DateTime.SpecifyKind(message.CreatedAt, DateTimeKind.Utc),
+            EditedAt = message.EditedAt == null ? null : DateTime.SpecifyKind(message.EditedAt.Value, DateTimeKind.Utc),
+            DeletedAt = message.DeletedAt == null ? null : DateTime.SpecifyKind(message.DeletedAt.Value, DateTimeKind.Utc),
+            IsDeleted = message.DeletedAt != null,
+            DeliveredAt = message.DeliveredAt == null
+                ? null
+                : DateTime.SpecifyKind(message.DeliveredAt.Value, DateTimeKind.Utc),
+            ReadAt = message.ReadAt == null
+                ? null
+                : DateTime.SpecifyKind(message.ReadAt.Value, DateTimeKind.Utc),
+            Reactions = message.DeletedAt is null
+                ? message.Reactions.Select(r => new ReactionDto
+                    {
+                        Emoji = r.Emoji,
+                        Count = r.Count,
+                        ReactedByCurrentUser = r.UserIds.Contains(userId)
+                    }).ToList()
+                : []
+        }).ToList();
 
         return new MessagePageDto
         {

@@ -1,8 +1,10 @@
 using ChatApi.Data;
+using ChatApi.DTOs.Conversations;
 using ChatApi.Hubs;
 using ChatApi.Models;
 using ChatApi.Services.Conversations;
 using ChatApi.Services.Presence;
+using ChatApi.Services.Reactions;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -234,7 +236,7 @@ public sealed class ConversationServiceTests : IAsyncLifetime
         var conversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
         Assert.NotNull(conversation);
         var transport = new RecordingHubTransport();
-        var hub = new ChatHub(_service, _presenceService)
+        var hub = new ChatHub(_service, _presenceService, new NullReactionService())
         {
             Context = new TestHubCallerContext("user-a"),
             Clients = transport.Clients
@@ -256,7 +258,7 @@ public sealed class ConversationServiceTests : IAsyncLifetime
         Assert.Empty(await _dbContext.Messages.ToListAsync());
 
         var unauthorizedTransport = new RecordingHubTransport();
-        var unauthorizedHub = new ChatHub(_service, _presenceService)
+        var unauthorizedHub = new ChatHub(_service, _presenceService, new NullReactionService())
         {
             Context = new TestHubCallerContext("user-c"),
             Clients = unauthorizedTransport.Clients
@@ -776,5 +778,26 @@ public sealed class ConversationServiceTests : IAsyncLifetime
 
             throw new NotSupportedException($"Unexpected SignalR proxy method: {targetMethod?.Name}");
         }
+    }
+
+    // Minimal stub used to satisfy the ChatHub constructor in tests that don't exercise reactions.
+    private sealed class NullReactionService : IReactionService
+    {
+        public IReadOnlySet<string> AllowedEmoji => new HashSet<string>();
+
+        public Task<ReactionMutationResult> ReactAsync(
+            long conversationId,
+            long messageId,
+            string userId,
+            string emoji,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new ReactionMutationResult(ReactionMutationStatus.NotFound));
+
+        public Task<IReadOnlyList<ReactionDto>?> GetReactionsAsync(
+            long conversationId,
+            long messageId,
+            string userId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<ReactionDto>?>(null);
     }
 }

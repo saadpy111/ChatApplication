@@ -15,4 +15,5 @@ public class Message
     public DateTime? ReadAt { get; set; }
     public Conversation Conversation { get; set; } = null!;
     public ApplicationUser Sender { get; set; } = null!;
-}
+    public ICollection<MessageReaction> Reactions { get; set; } = new List<MessageReaction>();
+}

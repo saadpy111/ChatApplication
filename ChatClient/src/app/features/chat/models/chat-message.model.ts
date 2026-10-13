@@ -1,3 +1,5 @@
+import { MessageReaction } from '../models/conversation.model';
+
 export interface ChatMessage {
   id: number;
   text: string;
@@ -8,6 +10,7 @@ export interface ChatMessage {
   isDeleted?: boolean;
   deliveredAt?: string | null;
   readAt?: string | null;
+  reactions: MessageReaction[];
 }
 
 export type ChatConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';

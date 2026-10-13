@@ -2,6 +2,7 @@ using ChatApi.DTOs.Conversations;
 using ChatApi.Models;
 using ChatApi.Services.Conversations;
 using ChatApi.Services.Presence;
+using ChatApi.Services.Reactions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
@@ -11,11 +12,16 @@ public class ChatHub : Hub
 {
     private readonly IConversationService _conversationService;
     private readonly IPresenceService _presenceService;
+    private readonly IReactionService _reactionService;
 
-    public ChatHub(IConversationService conversationService, IPresenceService presenceService)
+    public ChatHub(
+        IConversationService conversationService,
+        IPresenceService presenceService,
+        IReactionService reactionService)
     {
         _conversationService = conversationService;
         _presenceService = presenceService;
+        _reactionService = reactionService;
     }
 
     public override async Task OnConnectedAsync()
@@ -98,6 +104,51 @@ public class ChatHub : Hub
             .SendAsync("ReceiveMessage", saved.Value.Message, Context.ConnectionAborted);
         await SendUnreadCountUpdatedAsync(saved.Value.Message.ConversationId, saved.Value.RecipientId);
         return saved.Value.Message;
+    }
+
+    public async Task ReactToMessage(long conversationId, long messageId, string emoji)
+    {
+        var userId = Context.UserIdentifier;
+        if (string.IsNullOrEmpty(userId))
+        {
+            throw new HubException("The user could not be identified.");
+        }
+
+        var result = await _reactionService.ReactAsync(
+            conversationId, messageId, userId, emoji, Context.ConnectionAborted);
+
+        switch (result.Status)
+        {
+            case ReactionMutationStatus.NotFound:
+                throw new HubException("The message or conversation is unavailable.");
+            case ReactionMutationStatus.Forbidden:
+                throw new HubException("Reactions cannot be added to deleted messages.");
+            case ReactionMutationStatus.InvalidEmoji:
+                throw new HubException("The emoji is not supported.");
+        }
+
+        var actorPayload = new
+        {
+            ConversationId = result.ConversationId,
+            MessageId = result.MessageId,
+            Reactions = result.Reactions
+        };
+
+        var recipientId = result.RecipientId!;
+        var recipientReactions = await _reactionService.GetReactionsAsync(
+            conversationId, messageId, recipientId, Context.ConnectionAborted);
+        var recipientDelivery = recipientReactions is null
+            ? Task.CompletedTask
+            : Clients.User(recipientId).SendAsync("MessageReactionUpdated", new
+            {
+                ConversationId = result.ConversationId,
+                MessageId = result.MessageId,
+                Reactions = recipientReactions
+            }, Context.ConnectionAborted);
+
+        await Task.WhenAll(
+            Clients.User(userId).SendAsync("MessageReactionUpdated", actorPayload, Context.ConnectionAborted),
+            recipientDelivery);
     }
 
     public Task TypingStarted(long conversationId) => SendTypingEventAsync(conversationId, true);
