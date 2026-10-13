@@ -18,6 +18,7 @@ import { catchError, distinctUntilChanged, finalize, of, Subject, switchMap, tim
 import { User } from '../../../users/models/user';
 import { UsersApiService } from '../../../users/data-access/users-api.service';
 import { ConversationSummary, MessageSearchResult, UserPresence } from '../../models/conversation.model';
+import { ChatService } from '../../services/chatService';
 import { ConversationsApiService } from '../../services/conversations-api.service';
 
 type SidebarMode = 'conversations' | 'messages' | 'friends';
@@ -33,6 +34,7 @@ export class ChatSidebarComponent implements OnInit {
   private readonly injector = inject(Injector);
   private readonly usersApi = inject(UsersApiService);
   private readonly conversationsApi = inject(ConversationsApiService);
+  private readonly chatService = inject(ChatService);
   private readonly searchTerms = new Subject<string>();
   private readonly messageSearchTerms = new Subject<{ query: string; page: number; immediate: boolean }>();
   @ViewChild('messageSearchAction') private messageSearchAction?: ElementRef<HTMLButtonElement>;
@@ -64,8 +66,20 @@ export class ChatSidebarComponent implements OnInit {
   searchQuery = '';
   messageSearchQuery = '';
   private currentMessageSearchPage = 0;
+  private readonly deletedMessageIds = new Set<number>();
 
   ngOnInit(): void {
+    this.chatService.messageDeletes$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((message) => {
+        this.deletedMessageIds.add(message.id);
+        this.messageSearchResults.update((results) =>
+          results.filter((result) => result.messageId !== message.id));
+      });
+    this.chatService.messageEdits$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.searchMessagesNow(this.messageSearchQuery));
+
     this.searchTerms.pipe(
       distinctUntilChanged(),
       switchMap((query) => {
@@ -124,8 +138,8 @@ export class ChatSidebarComponent implements OnInit {
 
       this.currentMessageSearchPage = page;
       this.messageSearchResults.update((current) => page === 1
-        ? response.results
-        : [...current, ...response.results]);
+        ? response.results.filter((result) => !this.messageWasDeleted(result.messageId))
+        : [...current, ...response.results.filter((result) => !this.messageWasDeleted(result.messageId))]);
       this.messageSearchHasMore.set(response.hasMore);
     });
   }
@@ -293,5 +307,9 @@ export class ChatSidebarComponent implements OnInit {
     const normalizedQuery = query.trim();
     this.searchingMessages.set(Boolean(normalizedQuery));
     this.messageSearchTerms.next({ query: normalizedQuery, page: 1, immediate: true });
+  }
+
+  private messageWasDeleted(messageId: number): boolean {
+    return this.deletedMessageIds.has(messageId);
   }
 }

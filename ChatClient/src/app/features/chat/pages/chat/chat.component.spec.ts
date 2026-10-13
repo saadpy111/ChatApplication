@@ -12,6 +12,8 @@ import { signal } from '@angular/core';
 describe('ChatComponent message receipts', () => {
   const incomingMessages = new Subject<PersistedMessage>();
   const statusUpdates = new Subject<PersistedMessage>();
+  const messageEdits = new Subject<PersistedMessage>();
+  const messageDeletes = new Subject<PersistedMessage>();
   const unreadCountUpdates = new Subject<{ conversationId: number; unreadCount: number }>();
   const reconnected = new Subject<void>();
   const userTyping = new Subject<{ conversationId: number; userId: string; displayName: string }>();
@@ -22,6 +24,8 @@ describe('ChatComponent message receipts', () => {
   const sendMessage = vi.fn();
   const acknowledgeDelivered = vi.fn();
   const reconcilePendingDeliveries = vi.fn();
+  const editMessageRequest = vi.fn();
+  const deleteMessageRequest = vi.fn();
   const historicalMessages: PersistedMessage[] = [
     {
       id: 101,
@@ -62,6 +66,8 @@ describe('ChatComponent message receipts', () => {
     reconcilePendingDeliveries.mockReset();
     startTyping.mockReset();
     stopTyping.mockReset();
+    editMessageRequest.mockReset();
+    deleteMessageRequest.mockReset();
     getMessages = vi.fn(() => of({ messages: historicalMessages, nextCursor: null, hasMore: false }));
     getMessageContext = vi.fn(() => of({ messages: historicalMessages, nextCursor: null, hasMore: false }));
     await TestBed.configureTestingModule({
@@ -76,6 +82,8 @@ describe('ChatComponent message receipts', () => {
           useValue: {
             incomingMessages$: incomingMessages.asObservable(),
             messageStatusUpdates$: statusUpdates.asObservable(),
+            messageEdits$: messageEdits.asObservable(),
+            messageDeletes$: messageDeletes.asObservable(),
             unreadCountUpdates$: unreadCountUpdates.asObservable(),
             reconnected$: reconnected.asObservable(),
             userTyping$: userTyping.asObservable(),
@@ -83,6 +91,8 @@ describe('ChatComponent message receipts', () => {
             connectionLost$: connectionLost.asObservable(),
             status: signal('connected'),
             error: signal(null),
+            presenceByUserId: signal({}),
+            setConversationPresence: vi.fn(),
             startConnection: vi.fn().mockResolvedValue(undefined),
             sendMessage,
             startTyping,
@@ -98,6 +108,8 @@ describe('ChatComponent message receipts', () => {
             getConversations: () => of([]),
             getMessages,
             getMessageContext,
+            editMessage: editMessageRequest,
+            deleteMessage: deleteMessageRequest,
           },
         },
       ],
@@ -137,6 +149,67 @@ describe('ChatComponent message receipts', () => {
     expect(component.messages()[0]?.id).toBe(7);
     expect(component.messages()[0]?.deliveredAt).toBe(deliveredMessage.deliveredAt);
     expect(acknowledgeDelivered).not.toHaveBeenCalled();
+  });
+
+  it('applies persisted edits/deletes and prevents a late receipt event from restoring old content', async () => {
+    component.openExistingConversation({
+      conversationId: 42,
+      otherUserId: 'user-b',
+      otherUsername: 'bob',
+      lastMessagePreview: null,
+      lastMessageAt: null,
+      createdAt: '2026-10-11T11:00:00Z',
+      unreadCount: 0,
+    });
+    await fixture.whenStable();
+
+    const edited = {
+      ...historicalMessages[1]!,
+      content: 'Edited outgoing',
+      editedAt: '2026-10-13T12:00:00Z',
+    };
+    editMessageRequest.mockReturnValue(of(edited));
+    await component.editMessage({ conversationId: 42, messageId: 102, content: edited.content });
+    expect(component.messages().find((message) => message.id === 102)?.text).toBe('Edited outgoing');
+
+    statusUpdates.next({ ...historicalMessages[1]!, deliveredAt: '2026-10-13T12:01:00Z' });
+    expect(component.messages().find((message) => message.id === 102)?.text).toBe('Edited outgoing');
+    expect(component.messages().find((message) => message.id === 102)?.deliveredAt).toBe('2026-10-13T12:01:00Z');
+
+    const deleted = {
+      ...edited,
+      content: '',
+      isDeleted: true,
+      deletedAt: '2026-10-13T12:02:00Z',
+    };
+    deleteMessageRequest.mockReturnValue(of(deleted));
+    await component.deleteMessage({ conversationId: 42, messageId: 102 });
+    expect(component.messages().find((message) => message.id === 102)?.isDeleted).toBe(true);
+    expect(component.messages().find((message) => message.id === 102)?.text).toBe('');
+
+    messageEdits.next({ ...edited, content: 'Stale edit', editedAt: '2026-10-13T11:59:00Z' });
+    expect(component.messages().find((message) => message.id === 102)?.isDeleted).toBe(true);
+    expect(component.messages().find((message) => message.id === 102)?.text).toBe('');
+  });
+
+  it('keeps the original message and reports an inline error when an edit request fails', async () => {
+    component.openExistingConversation({
+      conversationId: 42,
+      otherUserId: 'user-b',
+      otherUsername: 'bob',
+      lastMessagePreview: null,
+      lastMessageAt: null,
+      createdAt: '2026-10-11T11:00:00Z',
+      unreadCount: 0,
+    });
+    await fixture.whenStable();
+    editMessageRequest.mockReturnValue(throwError(() => new Error('request failed')));
+
+    await component.editMessage({ conversationId: 42, messageId: 102, content: 'Rejected edit' });
+
+    expect(component.messages().find((message) => message.id === 102)?.text).toBe('My outgoing message');
+    expect(component.messageActionStates()[102]?.pending).toBe(false);
+    expect(component.messageActionStates()[102]?.error).toContain('could not be edited');
   });
 
   it('acknowledges delivery only for an incoming message', () => {

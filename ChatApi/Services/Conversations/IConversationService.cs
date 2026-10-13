@@ -34,6 +34,17 @@ public interface IConversationService
         string senderId,
         string content,
         CancellationToken cancellationToken);
+    Task<MessageMutationResult> EditMessageAsync(
+        long conversationId,
+        long messageId,
+        string senderId,
+        string content,
+        CancellationToken cancellationToken);
+    Task<MessageMutationResult> DeleteMessageAsync(
+        long conversationId,
+        long messageId,
+        string senderId,
+        CancellationToken cancellationToken);
     Task<(MessageDto Message, string SenderId)?> MarkMessageAsDeliveredAsync(
         long messageId,
         string recipientId,

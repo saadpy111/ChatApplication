@@ -82,14 +82,50 @@
           <p class="history-status" role="status">{{ navigationNotice() }}</p>
         }
         @for (message of messages(); track message.id) {
-          <article class="message" [class.own-message]="message.senderId === currentUserId()" [class.search-highlight]="message.id === activeSearchHighlightId()" [attr.id]="'message-' + message.id" [attr.data-message-id]="message.id" [attr.data-incoming]="message.senderId !== currentUserId()">
+          <article class="message" tabindex="-1" [class.own-message]="message.senderId === currentUserId()" [class.search-highlight]="message.id === activeSearchHighlightId()" [attr.id]="'message-' + message.id" [attr.data-message-id]="message.id" [attr.data-incoming]="message.senderId !== currentUserId()">
             <div class="message-avatar" aria-hidden="true">{{ message.senderId === currentUserId() ? (currentUsername().charAt(0).toUpperCase() || '?') : (friend()?.username?.charAt(0)?.toUpperCase() || '?') }}</div>
             <div class="message-body">
               <div class="message-meta">
                 <span class="message-author">{{ message.senderId === currentUserId() ? 'You' : friend()?.username }}</span>
                 <time>{{ message.sentAt | date:'shortTime' }}</time>
               </div>
-              <p dir="auto">{{ message.text }}</p>
+              @if (message.isDeleted) {
+                <p class="deleted-message" dir="auto">Message deleted</p>
+              } @else if (editingMessageId() === message.id) {
+                <form class="message-editor" (ngSubmit)="saveMessageEdit(message)">
+                  <textarea
+                    [(ngModel)]="editDraft"
+                    name="edited-message"
+                    rows="2"
+                    maxlength="2000"
+                    aria-label="Edit message"
+                    dir="auto"
+                    [disabled]="messageActionStates()[message.id]?.pending ?? false"
+                  ></textarea>
+                  <div class="message-editor-actions">
+                    <button type="button" (click)="cancelMessageEdit()" [disabled]="messageActionStates()[message.id]?.pending ?? false">Cancel</button>
+                    <button type="submit" [disabled]="!editDraft.trim() || editDraft.trim().length > 2000 || (messageActionStates()[message.id]?.pending ?? false)">
+                      {{ messageActionStates()[message.id]?.pending ? 'Saving...' : 'Save' }}
+                    </button>
+                  </div>
+                </form>
+              } @else {
+                <p dir="auto">{{ message.text }}</p>
+                @if (message.editedAt) {
+                  <span class="edited-indicator">Edited</span>
+                }
+              }
+              @if (message.senderId === currentUserId() && !message.isDeleted && editingMessageId() !== message.id) {
+                <div class="message-actions">
+                  <button type="button" (click)="startMessageEdit(message)" [disabled]="messageActionStates()[message.id]?.pending ?? false">Edit</button>
+                  <button type="button" (click)="requestMessageDelete(message, $event)" [disabled]="messageActionStates()[message.id]?.pending ?? false">
+                    {{ messageActionStates()[message.id]?.pending ? 'Deleting...' : 'Delete' }}
+                  </button>
+                </div>
+              }
+              @if (messageActionStates()[message.id]?.error; as actionError) {
+                <p class="message-action-error" role="alert">{{ actionError }}</p>
+              }
               @if (message.senderId === currentUserId()) {
                 <span
                   class="message-status"
@@ -141,4 +177,22 @@
       </form>
     </footer>
   }
+
+  <dialog
+    #deleteDialog
+    class="delete-dialog"
+    role="alertdialog"
+    aria-modal="true"
+    aria-labelledby="delete-dialog-title"
+    aria-describedby="delete-dialog-description"
+    (cancel)="handleDeleteDialogCancel($event)"
+    (click)="handleDeleteDialogClick($event)"
+  >
+    <h2 id="delete-dialog-title">Delete this message?</h2>
+    <p id="delete-dialog-description">This action cannot be undone.</p>
+    <div class="delete-dialog-actions">
+      <button #deleteCancelButton class="dialog-cancel" type="button" (click)="cancelDeleteConfirmation()">Cancel</button>
+      <button class="dialog-delete" type="button" (click)="confirmMessageDelete()">Delete</button>
+    </div>
+  </dialog>
 </main>
