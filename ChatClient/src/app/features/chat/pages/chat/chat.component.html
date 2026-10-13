@@ -1,6 +1,7 @@
 <div class="chat-shell" [class.mobile-conversation-open]="showConversationOnMobile()">
   <app-chat-sidebar
     [currentUserId]="authService.currentUser()?.userId ?? null"
+    [presenceByUserId]="chatService.presenceByUserId()"
     [conversations]="conversations()"
     [conversationsLoading]="conversationsLoading()"
     [conversationsError]="conversationsError()"
@@ -14,6 +15,7 @@
   />
   <app-chat-conversation
     [friend]="selectedFriend()"
+    [presence]="presenceForSelectedFriend()"
     [conversationId]="selectedConversationId()"
     [conversationActive]="showConversationOnMobile()"
     [messages]="messages()"

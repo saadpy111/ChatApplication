@@ -30,7 +30,12 @@
           type="button"
           (click)="selectConversation(conversation)"
         >
-          <span class="friend-avatar" aria-hidden="true">{{ conversation.otherUsername.charAt(0).toUpperCase() || '?' }}</span>
+          <span class="avatar-presence">
+            <span class="friend-avatar" aria-hidden="true">{{ conversation.otherUsername.charAt(0).toUpperCase() || '?' }}</span>
+            @if (presenceByUserId()[conversation.otherUserId]?.isOnline) {
+              <span class="presence-indicator" role="img" aria-label="Online" title="Online"></span>
+            }
+          </span>
           <span class="conversation-copy">
             <span class="conversation-heading">
               <span class="friend-name" dir="auto">{{ conversation.otherUsername }}</span>
@@ -159,7 +164,12 @@
             type="button"
             (click)="selectFriend(friend)"
           >
-            <span class="friend-avatar" aria-hidden="true">{{ friend.username.charAt(0).toUpperCase() || '?' }}</span>
+            <span class="avatar-presence">
+              <span class="friend-avatar" aria-hidden="true">{{ friend.username.charAt(0).toUpperCase() || '?' }}</span>
+              @if (presenceByUserId()[friend.userId]?.isOnline) {
+                <span class="presence-indicator" role="img" aria-label="Online" title="Online"></span>
+              }
+            </span>
             <span class="friend-name" dir="auto">{{ friend.username }}</span>
           </button>
         }

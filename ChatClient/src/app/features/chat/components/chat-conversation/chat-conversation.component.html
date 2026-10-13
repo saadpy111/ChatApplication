@@ -9,6 +9,13 @@
     <div class="room-heading">
       @if (friend(); as selected) {
         <h1 dir="auto">{{ selected.username }}</h1>
+        @if (presence(); as userPresence) {
+          @if (userPresence.isOnline) {
+            <span class="user-presence online"><span class="presence-indicator" aria-hidden="true"></span>Online</span>
+          } @else if (userPresence.lastSeenAt; as lastSeenAt) {
+            <span class="user-presence">Last seen {{ lastSeenAt | date:'short' }}</span>
+          }
+        }
       } @else {
         <h1>Messages</h1>
       }
