@@ -1,45 +1,16 @@
-<aside class="sidebar" aria-label="Chat navigation">
-  <section class="sidebar-section search-section" aria-labelledby="search-heading">
-    <h2 id="search-heading">Find a friend</h2>
-    <input
-      class="search-input"
-      [(ngModel)]="searchQuery"
-      (ngModelChange)="searchFriends($event)"
-      type="search"
-      placeholder="Search by username"
-      aria-label="Search by username"
-      autocomplete="off"
-    />
-
-    <div class="friend-results" aria-live="polite">
-      @if (searching()) {
-        <p class="search-state" role="status">Searching...</p>
-      } @else if (searchError()) {
-        <p class="search-state search-error" role="alert">{{ searchError() }}</p>
-      } @else if (searchQuery.trim() && friends().length === 0) {
-        <p class="search-state">No users found.</p>
-      }
-
-      @for (friend of friends(); track friend.userId) {
-        <button
-          class="friend-row"
-          [class.selected]="selectedFriend()?.userId === friend.userId"
-          [disabled]="openingConversation()"
-          type="button"
-          (click)="selectFriend(friend)"
-        >
-          <span class="friend-avatar" aria-hidden="true">{{ friend.username.charAt(0).toUpperCase() || '?' }}</span>
-          <span class="friend-name" dir="auto">{{ friend.username }}</span>
+<aside class="sidebar" [class.search-mode]="mode() === 'messages'" [class.friend-mode]="mode() === 'friends'" aria-label="Chat navigation" (keydown)="handleEscape($event)">
+  @if (mode() === 'conversations') {
+    <header class="sidebar-header">
+      <h1>Chats</h1>
+      <div class="sidebar-actions">
+        <button #messageSearchAction class="icon-button" type="button" aria-label="Search messages" title="Search messages" (click)="openMessageSearch()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"/><path d="m15.5 15.5 4.2 4.2"/></svg>
         </button>
-      }
-      @if (openingConversation()) {
-        <p class="search-state">Opening conversation...</p>
-      }
-    </div>
-  </section>
-
-  <section class="sidebar-section conversations-section" aria-labelledby="conversations-heading">
-    <h2 id="conversations-heading">Conversations</h2>
+        <button #friendSearchAction class="icon-button" type="button" aria-label="Find a friend" title="New conversation" (click)="openFriendSearch()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 19a6 6 0 0 0-12 0M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM19 8v6M16 11h6"/></svg>
+        </button>
+      </div>
+    </header>
     <div class="conversation-list" aria-live="polite">
       @if (conversationsLoading()) {
         <p class="search-state" role="status">Loading conversations...</p>
@@ -80,5 +51,122 @@
         </button>
       }
     </div>
-  </section>
+  } @else if (mode() === 'messages') {
+    <header class="mode-header">
+      <button class="back-button" type="button" aria-label="Back to chats" title="Back to chats" (click)="returnToConversations()">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7M8 12h13"/></svg>
+      </button>
+      <h1>Search messages</h1>
+    </header>
+    <form class="message-search-form" role="search" (submit)="submitMessageSearch($event)">
+      <label class="visually-hidden" for="message-search-input">Search messages</label>
+      <div class="search-field">
+        <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"/><path d="m15.5 15.5 4.2 4.2"/></svg>
+        <input
+          #messageSearchInput
+          id="message-search-input"
+          class="search-input message-search-input"
+          [value]="messageSearchQuery"
+          (input)="handleMessageSearchInput($event)"
+          type="search"
+          placeholder="Search messages"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        @if (messageSearchQuery) {
+          <button class="clear-search" type="button" aria-label="Clear search" title="Clear search" (click)="clearMessageSearch()">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+          </button>
+        }
+      </div>
+    </form>
+    <div class="message-results" aria-live="polite" aria-busy="{{ searchingMessages() }}">
+      @if (searchingMessages()) {
+        <p class="search-state" role="status">{{ messageSearchResults().length ? 'Loading more results...' : 'Searching messages...' }}</p>
+      } @else if (messageSearchError()) {
+        <div class="search-state search-error" role="alert">
+          <span>{{ messageSearchError() }}</span>
+          @if (failedMessageSearchPage()) {
+            <button class="retry-link" type="button" (click)="retryMessageSearch()">Retry</button>
+          }
+        </div>
+      } @else if (messageSearchQuery.trim() && messageSearchResults().length === 0) {
+        <p class="search-state" role="status">No messages found</p>
+      } @else if (!messageSearchQuery.trim()) {
+        <p class="search-prompt">Find a phrase in your conversations</p>
+      }
+
+      @for (result of messageSearchResults(); track result.messageId) {
+        <button class="message-result-row" type="button" (click)="selectMessageResult(result)">
+          <span class="result-avatar" aria-hidden="true">{{ result.otherUsername.charAt(0).toUpperCase() || '?' }}</span>
+          <span class="result-copy">
+            <span class="result-heading">
+              <span class="result-name" dir="auto">{{ result.otherUsername }}</span>
+              <time>{{ result.createdAt | date:'short' }}</time>
+            </span>
+            <span class="result-preview" dir="auto">
+              @if (result.senderId === currentUserId()) {
+                <span class="result-sender">You:</span>
+              }
+              @for (part of highlightedSnippet(result.content); track $index) {
+                <span [class.result-match]="part.matched">{{ part.text }}</span>
+              }
+            </span>
+          </span>
+        </button>
+      }
+
+      @if (messageSearchHasMore() && !searchingMessages()) {
+        <button class="load-more-results" type="button" (click)="loadMoreMessageResults()">Load more messages</button>
+      }
+    </div>
+  } @else {
+    <header class="mode-header">
+      <button class="back-button" type="button" aria-label="Back to chats" title="Back to chats" (click)="returnToConversations()">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7M8 12h13"/></svg>
+      </button>
+      <h1>New conversation</h1>
+    </header>
+    <section class="friend-search-panel" aria-labelledby="friend-search-heading">
+      <h2 id="friend-search-heading">Find a friend</h2>
+      <div class="search-field">
+        <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"/><path d="m15.5 15.5 4.2 4.2"/></svg>
+        <input
+          #friendSearchInput
+          class="search-input"
+          [(ngModel)]="searchQuery"
+          (ngModelChange)="searchFriends($event)"
+          type="search"
+          placeholder="Search by username"
+          aria-label="Search by username"
+          autocomplete="off"
+        />
+      </div>
+      <div class="friend-results" aria-live="polite">
+        @if (searching()) {
+          <p class="search-state" role="status">Searching...</p>
+        } @else if (searchError()) {
+          <p class="search-state search-error" role="alert">{{ searchError() }}</p>
+        } @else if (searchQuery.trim() && friends().length === 0) {
+          <p class="search-state" role="status">No users found.</p>
+        }
+
+        @for (friend of friends(); track friend.userId) {
+          <button
+            class="friend-row"
+            [class.selected]="selectedFriend()?.userId === friend.userId"
+            [disabled]="openingConversation()"
+            type="button"
+            (click)="selectFriend(friend)"
+          >
+            <span class="friend-avatar" aria-hidden="true">{{ friend.username.charAt(0).toUpperCase() || '?' }}</span>
+            <span class="friend-name" dir="auto">{{ friend.username }}</span>
+          </button>
+        }
+        @if (openingConversation()) {
+          <p class="search-state" role="status">Opening conversation...</p>
+        }
+      </div>
+    </section>
+  }
 </aside>

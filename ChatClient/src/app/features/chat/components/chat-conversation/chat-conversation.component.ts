@@ -1,5 +1,5 @@
 import { DatePipe, DOCUMENT } from '@angular/common';
-import { AfterViewChecked, afterNextRender, Component, DestroyRef, ElementRef, inject, Injector, input, OnChanges, output, SimpleChanges, ViewChild } from '@angular/core';
+import { AfterViewChecked, afterNextRender, Component, DestroyRef, ElementRef, inject, Injector, input, OnChanges, output, signal, SimpleChanges, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ChatConnectionStatus, ChatMessage, MessageSendRequest, MessageSendResult } from '../../models/chat-message.model';
 import { User } from '../../../users/models/user';
@@ -18,6 +18,8 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   private readonly observedMessages = new Set<Element>();
   private readonly visibleIncomingMessageIds = new Set<number>();
   private lastReadBoundary: { id: number; sentAt: number } | null = null;
+  private pendingSearchNavigation: { messageId: number; requestVersion: number } | null = null;
+  private searchHighlightTimer: ReturnType<typeof setTimeout> | null = null;
   @ViewChild('messageList') private messageList?: ElementRef<HTMLElement>;
   @ViewChild('messageInput') private messageInput?: ElementRef<HTMLTextAreaElement>;
   @ViewChild('sendButton') private sendButton?: ElementRef<HTMLButtonElement>;
@@ -29,6 +31,10 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   readonly initialLoading = input(false);
   readonly loadingOlder = input(false);
   readonly historyError = input<string | null>(null);
+  readonly navigationNotice = input<string | null>(null);
+  readonly highlightedMessageId = input<number | null>(null);
+  readonly highlightRequestVersion = input(0);
+  readonly activeSearchHighlightId = signal<number | null>(null);
   readonly hasMore = input(false);
   readonly olderPageVersion = input(0);
   readonly connectionStatus = input<ChatConnectionStatus>('disconnected');
@@ -46,6 +52,11 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   readonly retryConnection = output<void>();
   readonly backToList = output<void>();
   readonly readAcknowledged = output<{ conversationId: number; lastReadMessageId: number }>();
+  readonly searchNavigationFailed = output<{
+    conversationId: number;
+    messageId: number;
+    requestVersion: number;
+  }>();
 
   draft = '';
   private previousMessageCount = 0;
@@ -70,6 +81,8 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
       this.document.removeEventListener('visibilitychange', this.handleDocumentVisibilityChange);
       this.readObserver?.disconnect();
       this.clearTypingStopTimer();
+      this.clearSearchHighlightTimer();
+      this.pendingSearchNavigation = null;
       this.activeTypingConversationId = null;
     });
   }
@@ -93,6 +106,20 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
       this.observedMessages.clear();
       this.visibleIncomingMessageIds.clear();
       this.lastReadBoundary = null;
+      this.clearSearchNavigation();
+    }
+    if (changes['highlightedMessageId'] || changes['highlightRequestVersion'] || changes['conversationActive']) {
+      const messageId = this.highlightedMessageId();
+      if (messageId === null) {
+        this.clearSearchNavigation();
+      } else if (this.conversationActive()) {
+        this.clearSearchHighlightTimer();
+        this.activeSearchHighlightId.set(null);
+        this.pendingSearchNavigation = {
+          messageId,
+          requestVersion: this.highlightRequestVersion(),
+        };
+      }
     }
 
     const result = this.sendResult();
@@ -138,6 +165,7 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
         this.preserveScroll = false;
       }
       this.previousMessageCount = messages.length;
+      this.navigateToSearchResult(element);
       this.refreshReadTracking(element);
       return;
     }
@@ -148,7 +176,74 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
       }
       this.previousMessageCount = messages.length;
     }
+    this.navigateToSearchResult(element);
     this.refreshReadTracking(element);
+  }
+
+  private navigateToSearchResult(container: HTMLElement): void {
+    const pending = this.pendingSearchNavigation;
+    if (!pending || !this.conversationActive() || this.initialLoading()) {
+      return;
+    }
+
+    const conversationId = this.conversationId();
+    if (!conversationId || conversationId <= 0) {
+      return;
+    }
+
+    const targetMessage = this.messages().find((message) => message.id === pending.messageId);
+    if (!targetMessage) {
+      this.failSearchNavigation(pending, conversationId);
+      return;
+    }
+
+    const targetElement = container.querySelector<HTMLElement>(`#message-${pending.messageId}`);
+    if (!targetElement) {
+      this.failSearchNavigation(pending, conversationId);
+      return;
+    }
+
+    this.pendingSearchNavigation = null;
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = targetElement.getBoundingClientRect();
+    const top = Math.max(0, container.scrollTop + targetRect.top - containerRect.top -
+      (container.clientHeight - targetRect.height) / 2);
+    container.scrollTop = top;
+
+    this.activeSearchHighlightId.set(pending.messageId);
+    this.clearSearchHighlightTimer();
+    this.searchHighlightTimer = setTimeout(() => {
+      if (this.highlightedMessageId() === pending.messageId &&
+          this.highlightRequestVersion() === pending.requestVersion) {
+        this.activeSearchHighlightId.set(null);
+      }
+      this.searchHighlightTimer = null;
+    }, 2800);
+  }
+
+  private failSearchNavigation(
+    pending: { messageId: number; requestVersion: number },
+    conversationId: number,
+  ): void {
+    this.pendingSearchNavigation = null;
+    this.searchNavigationFailed.emit({
+      conversationId,
+      messageId: pending.messageId,
+      requestVersion: pending.requestVersion,
+    });
+  }
+
+  private clearSearchNavigation(): void {
+    this.pendingSearchNavigation = null;
+    this.activeSearchHighlightId.set(null);
+    this.clearSearchHighlightTimer();
+  }
+
+  private clearSearchHighlightTimer(): void {
+    if (this.searchHighlightTimer !== null) {
+      clearTimeout(this.searchHighlightTimer);
+      this.searchHighlightTimer = null;
+    }
   }
 
   handleScroll(event: Event): void {

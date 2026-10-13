@@ -253,6 +253,45 @@ describe('ChatConversationComponent composer', () => {
     expect(document.activeElement).toBe(textarea);
   });
 
+  it('waits for the target message to render, scrolls the message list, and expires the highlight', () => {
+    vi.useFakeTimers();
+    const messageList = fixture.nativeElement.querySelector('.message-list') as HTMLElement;
+    Object.defineProperty(messageList, 'clientHeight', { value: 400 });
+    vi.spyOn(messageList, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 500, height: 400 } as DOMRect);
+
+    fixture.componentRef.setInput('highlightRequestVersion', 1);
+    fixture.detectChanges();
+
+    fixture.componentRef.setInput('messages', [
+      { id: 501, text: 'Historical target', senderId: 'friend-id', sentAt: new Date() },
+    ]);
+    fixture.detectChanges();
+    const target = fixture.nativeElement.querySelector('[data-message-id="501"]') as HTMLElement;
+    vi.spyOn(target, 'getBoundingClientRect').mockReturnValue({ top: 350, bottom: 410, height: 60 } as DOMRect);
+    Object.defineProperty(messageList, 'scrollHeight', { value: 1000 });
+    fixture.componentRef.setInput('highlightedMessageId', 501);
+    fixture.detectChanges();
+
+    expect(messageList.scrollTop).toBe(80);
+    expect(target.id).toBe('message-501');
+    expect(target.classList.contains('search-highlight')).toBe(true);
+
+    vi.advanceTimersByTime(2800);
+    fixture.detectChanges();
+    expect(target.classList.contains('search-highlight')).toBe(false);
+  });
+
+  it('reports a target that is missing after message loading completes', () => {
+    const failures: { conversationId: number; messageId: number; requestVersion: number }[] = [];
+    component.searchNavigationFailed.subscribe((failure) => failures.push(failure));
+    fixture.componentRef.setInput('highlightRequestVersion', 7);
+    fixture.componentRef.setInput('highlightedMessageId', 999);
+    fixture.detectChanges();
+    fixture.detectChanges();
+
+    expect(failures).toEqual([{ conversationId: 42, messageId: 999, requestVersion: 7 }]);
+  });
+
   it('renders sent, delivered, and read states only for own messages', () => {
     fixture.componentRef.setInput('currentUserId', 'me');
     fixture.componentRef.setInput('messages', [

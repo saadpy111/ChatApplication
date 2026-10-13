@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { Subject, of } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 import { AuthService } from '../../../../core/services/auth.service';
 import { User } from '../../../users/models/user';
@@ -53,6 +53,8 @@ describe('ChatComponent message receipts', () => {
   ];
   let fixture: ReturnType<typeof TestBed.createComponent<ChatComponent>>;
   let component: ChatComponent;
+  let getMessages: ReturnType<typeof vi.fn>;
+  let getMessageContext: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     sendMessage.mockReset();
@@ -60,6 +62,8 @@ describe('ChatComponent message receipts', () => {
     reconcilePendingDeliveries.mockReset();
     startTyping.mockReset();
     stopTyping.mockReset();
+    getMessages = vi.fn(() => of({ messages: historicalMessages, nextCursor: null, hasMore: false }));
+    getMessageContext = vi.fn(() => of({ messages: historicalMessages, nextCursor: null, hasMore: false }));
     await TestBed.configureTestingModule({
       imports: [ChatComponent],
       providers: [
@@ -92,7 +96,8 @@ describe('ChatComponent message receipts', () => {
           provide: ConversationsApiService,
           useValue: {
             getConversations: () => of([]),
-              getMessages: () => of({ messages: historicalMessages, nextCursor: null, hasMore: false }),
+            getMessages,
+            getMessageContext,
           },
         },
       ],
@@ -162,6 +167,136 @@ describe('ChatComponent message receipts', () => {
 
     expect(acknowledgeDelivered).toHaveBeenCalledExactlyOnceWith(101);
     expect(component.messages().map((message) => message.id)).toEqual([101, 102, 103]);
+  });
+
+  it('opens a search result by loading its historical context', async () => {
+    getMessageContext.mockReturnValue(of({
+      messages: historicalMessages,
+      nextCursor: 'older-cursor',
+      hasMore: true,
+    }));
+
+    component.openMessageResult({
+      messageId: 101,
+      conversationId: 42,
+      content: 'Offline message',
+      senderId: 'user-b',
+      senderDisplayName: 'bob',
+      otherUserId: 'user-b',
+      otherUsername: 'bob',
+      createdAt: '2026-10-11T12:00:00Z',
+    });
+    await fixture.whenStable();
+
+    expect(getMessageContext).toHaveBeenCalledExactlyOnceWith(42, 101);
+    expect(component.selectedConversationId()).toBe(42);
+    expect(component.selectedMessageId()).toBe(101);
+    expect(component.messages().map((message) => message.id)).toEqual([101, 102, 103]);
+    expect(component.hasMore()).toBe(true);
+    expect(fixture.nativeElement.querySelector('#message-101.search-highlight')).not.toBeNull();
+  });
+
+  it('reports an unavailable search message without loading the latest page instead', async () => {
+    getMessageContext.mockReturnValue(throwError(() => new Error('history unavailable')));
+
+    component.openMessageResult({
+      messageId: 999,
+      conversationId: 42,
+      content: 'Missing message',
+      senderId: 'user-b',
+      senderDisplayName: 'bob',
+      otherUserId: 'user-b',
+      otherUsername: 'bob',
+      createdAt: '2026-10-11T12:00:00Z',
+    });
+    await fixture.whenStable();
+
+    expect(getMessages).not.toHaveBeenCalled();
+    expect(component.messages()).toEqual([]);
+    expect(component.navigationNotice()).toContain('unavailable or could not be loaded');
+    expect(component.selectedMessageId()).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Could not open that message.');
+  });
+
+  it('keeps only the latest target when search results are selected before context responses finish', async () => {
+    const firstResponse = new Subject<{
+      messages: PersistedMessage[];
+      nextCursor: string | null;
+      hasMore: boolean;
+    }>();
+    const secondResponse = new Subject<{
+      messages: PersistedMessage[];
+      nextCursor: string | null;
+      hasMore: boolean;
+    }>();
+    getMessageContext.mockReturnValueOnce(firstResponse).mockReturnValueOnce(secondResponse);
+
+    component.openMessageResult({
+      messageId: 101,
+      conversationId: 42,
+      content: 'Older result',
+      senderId: 'user-b',
+      senderDisplayName: 'bob',
+      otherUserId: 'user-b',
+      otherUsername: 'bob',
+      createdAt: '2026-10-11T12:00:00Z',
+    });
+    component.openMessageResult({
+      messageId: 202,
+      conversationId: 43,
+      content: 'Latest result',
+      senderId: 'user-c',
+      senderDisplayName: 'cara',
+      otherUserId: 'user-c',
+      otherUsername: 'cara',
+      createdAt: '2026-10-11T13:00:00Z',
+    });
+
+    secondResponse.next({
+      messages: [{
+        id: 202,
+        conversationId: 43,
+        senderId: 'user-c',
+        content: 'Latest result',
+        createdAt: '2026-10-11T13:00:00Z',
+        deliveredAt: null,
+        readAt: null,
+      }],
+      nextCursor: null,
+      hasMore: false,
+    });
+    await fixture.whenStable();
+    firstResponse.next({ messages: historicalMessages, nextCursor: null, hasMore: false });
+    await fixture.whenStable();
+
+    expect(component.selectedConversationId()).toBe(43);
+    expect(component.selectedMessageId()).toBe(202);
+    expect(component.messages().map((message) => message.id)).toEqual([202]);
+  });
+
+  it('rejects a context response that does not contain the selected message', async () => {
+    getMessageContext.mockReturnValue(of({
+      messages: historicalMessages,
+      nextCursor: null,
+      hasMore: false,
+    }));
+
+    component.openMessageResult({
+      messageId: 999,
+      conversationId: 42,
+      content: 'Missing result',
+      senderId: 'user-b',
+      senderDisplayName: 'bob',
+      otherUserId: 'user-b',
+      otherUsername: 'bob',
+      createdAt: '2026-10-11T14:00:00Z',
+    });
+    await fixture.whenStable();
+
+    expect(component.messages()).toEqual([]);
+    expect(component.selectedMessageId()).toBeNull();
+    expect(component.navigationNotice()).toContain('unavailable or could not be loaded');
+    expect(getMessages).not.toHaveBeenCalled();
   });
 
   it('requests pending-delivery reconciliation after the sidebar list loads', async () => {

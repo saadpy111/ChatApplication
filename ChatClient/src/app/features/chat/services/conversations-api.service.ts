@@ -1,7 +1,12 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
-import { ConversationSummary, MessagePage, OpenConversation } from '../models/conversation.model';
+import {
+  ConversationSummary,
+  MessagePage,
+  MessageSearchPage,
+  OpenConversation,
+} from '../models/conversation.model';
 
 @Injectable({ providedIn: 'root' })
 export class ConversationsApiService {
@@ -23,5 +28,19 @@ export class ConversationsApiService {
     }
 
     return this.http.get<MessagePage>(`${this.baseUrl}/${conversationId}/messages`, { params });
+  }
+
+  getMessageContext(conversationId: number, messageId: number): Observable<MessagePage> {
+    return this.http.get<MessagePage>(
+      `${this.baseUrl}/${conversationId}/messages/${messageId}/context`,
+    );
+  }
+
+  searchMessages(query: string, page = 1, pageSize = 20): Observable<MessageSearchPage> {
+    const params = new HttpParams()
+      .set('q', query)
+      .set('page', page)
+      .set('pageSize', pageSize);
+    return this.http.get<MessageSearchPage>(`${this.baseUrl}/search/messages`, { params });
   }
 }

@@ -231,6 +231,114 @@ public sealed class ConversationServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SearchMessagesScopesResultsToParticipantsOrdersAndPaginates()
+    {
+        var firstConversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
+        var secondConversation = await _service.OpenAsync("user-a", "user-c", CancellationToken.None);
+        var privateConversation = await _service.OpenAsync("user-b", "user-c", CancellationToken.None);
+        Assert.NotNull(firstConversation);
+        Assert.NotNull(secondConversation);
+        Assert.NotNull(privateConversation);
+        var createdAt = new DateTime(2026, 10, 11, 12, 0, 0, DateTimeKind.Utc);
+
+        _dbContext.Messages.AddRange(
+            new Message
+            {
+                ConversationId = firstConversation.ConversationId,
+                SenderId = "user-b",
+                Content = "Found Needle 100% complete",
+                CreatedAt = createdAt
+            },
+            new Message
+            {
+                ConversationId = secondConversation.ConversationId,
+                SenderId = "user-c",
+                Content = "Another needle 100% complete",
+                CreatedAt = createdAt
+            },
+            new Message
+            {
+                ConversationId = privateConversation.ConversationId,
+                SenderId = "user-b",
+                Content = "Needle must stay private",
+                CreatedAt = createdAt.AddMinutes(1)
+            });
+        await _dbContext.SaveChangesAsync();
+
+        var firstPage = await _service.SearchMessagesAsync(
+            "user-a", "  NEEDLE  ", 1, 1, CancellationToken.None);
+        var secondPage = await _service.SearchMessagesAsync(
+            "user-a", "needle", 2, 1, CancellationToken.None);
+        var literalWildcard = await _service.SearchMessagesAsync(
+            "user-a", "%", 1, 20, CancellationToken.None);
+
+        var newest = Assert.Single(firstPage.Results);
+        Assert.Equal(secondConversation.ConversationId, newest.ConversationId);
+        Assert.Equal("cara", newest.SenderDisplayName);
+        Assert.Equal("cara", newest.OtherUsername);
+        Assert.True(firstPage.HasMore);
+        Assert.Equal(1, firstPage.Page);
+        Assert.Equal(1, firstPage.PageSize);
+
+        var older = Assert.Single(secondPage.Results);
+        Assert.Equal(firstConversation.ConversationId, older.ConversationId);
+        Assert.Equal("bob", older.SenderDisplayName);
+        Assert.Equal("bob", older.OtherUsername);
+        Assert.False(secondPage.HasMore);
+        Assert.Equal(2, literalWildcard.Results.Count);
+        Assert.DoesNotContain(firstPage.Results, result => result.ConversationId == privateConversation.ConversationId);
+    }
+
+    [Fact]
+    public async Task SearchMessagesRejectsInvalidTermsAndPaginationAndReturnsNoMatches()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.SearchMessagesAsync(
+            "user-a", "   ", 1, 20, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.SearchMessagesAsync(
+            "user-a", new string('x', 201), 1, 20, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => _service.SearchMessagesAsync(
+            "user-a", "term", 0, 20, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => _service.SearchMessagesAsync(
+            "user-a", "term", 1, 51, CancellationToken.None));
+
+        var noMatches = await _service.SearchMessagesAsync(
+            "user-a", "missing", 1, 20, CancellationToken.None);
+
+        Assert.Empty(noMatches.Results);
+        Assert.False(noMatches.HasMore);
+    }
+
+    [Fact]
+    public async Task GetMessageContextIncludesTargetAndRequiresConversationMembership()
+    {
+        var conversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);
+        Assert.NotNull(conversation);
+        var createdAt = new DateTime(2026, 10, 11, 12, 0, 0, DateTimeKind.Utc);
+        var history = Enumerable.Range(1, 35).Select(index => new Message
+        {
+            ConversationId = conversation.ConversationId,
+            SenderId = index % 2 == 0 ? "user-a" : "user-b",
+            Content = $"message {index}",
+            CreatedAt = createdAt.AddMinutes(index)
+        }).ToArray();
+        _dbContext.Messages.AddRange(history);
+        await _dbContext.SaveChangesAsync();
+
+        var context = await _service.GetMessageContextAsync(
+            conversation.ConversationId, history[17].Id, "user-a", CancellationToken.None);
+        var unauthorized = await _service.GetMessageContextAsync(
+            conversation.ConversationId, history[17].Id, "user-c", CancellationToken.None);
+
+        Assert.NotNull(context);
+        Assert.Equal(30, context.Messages.Count);
+        Assert.Equal(history[17].Id, context.Messages[15].Id);
+        Assert.Equal(history[18].Id, context.Messages[16].Id);
+        Assert.True(context.HasMore);
+        Assert.NotNull(context.NextCursor);
+        Assert.Null(unauthorized);
+    }
+
+    [Fact]
     public async Task DeliveryAcknowledgementIsRecipientOnlyAndIdempotent()
     {
         var conversation = await _service.OpenAsync("user-a", "user-b", CancellationToken.None);

@@ -2,7 +2,13 @@ import { Component, DestroyRef, inject, OnInit, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { ChatMessage, MessageSendRequest, MessageSendResult } from '../../models/chat-message.model';
-import { ConversationSummary, MessagePage, PersistedMessage, UnreadCountUpdate } from '../../models/conversation.model';
+import {
+  ConversationSummary,
+  MessagePage,
+  MessageSearchResult,
+  PersistedMessage,
+  UnreadCountUpdate,
+} from '../../models/conversation.model';
 import { ChatConversationComponent } from '../../components/chat-conversation/chat-conversation.component';
 import { ChatSidebarComponent } from '../../components/chat-sidebar/chat-sidebar.component';
 import { User } from '../../../users/models/user';
@@ -33,6 +39,9 @@ export class ChatComponent implements OnInit {
   readonly initialLoading = signal(false);
   readonly loadingOlder = signal(false);
   readonly historyError = signal<string | null>(null);
+  readonly navigationNotice = signal<string | null>(null);
+  readonly selectedMessageId = signal<number | null>(null);
+  readonly messageNavigationVersion = signal(0);
   readonly hasMore = signal(false);
   readonly olderPageVersion = signal(0);
   readonly openingConversation = signal(false);
@@ -116,6 +125,31 @@ export class ChatComponent implements OnInit {
       userId: conversation.otherUserId,
       username: conversation.otherUsername,
     });
+  }
+
+  openMessageResult(result: MessageSearchResult): void {
+    this.selectedMessageId.set(null);
+    this.messageNavigationVersion.update((version) => version + 1);
+    this.navigationNotice.set(null);
+    void this.activateConversation(result.conversationId, {
+      userId: result.otherUserId,
+      username: result.otherUsername,
+    }, result.messageId);
+  }
+
+  handleSearchNavigationFailed(event: {
+    conversationId: number;
+    messageId: number;
+    requestVersion: number;
+  }): void {
+    if (this.selectedConversationId() !== event.conversationId ||
+        this.selectedMessageId() !== event.messageId ||
+        this.messageNavigationVersion() !== event.requestVersion) {
+      return;
+    }
+
+    this.selectedMessageId.set(null);
+    this.navigationNotice.set('The selected message could not be displayed. Please choose the result again.');
   }
 
   showConversationListOnMobile(): void {
@@ -202,13 +236,18 @@ export class ChatComponent implements OnInit {
     }
   }
 
-  private async activateConversation(conversationId: number, friend: User): Promise<void> {
+  private async activateConversation(
+    conversationId: number,
+    friend: User,
+    targetMessageId?: number,
+  ): Promise<void> {
     this.clearTypingIndicator();
     const loadVersion = ++this.conversationLoadVersion;
     this.showConversationOnMobile.set(true);
     this.selectedConversationId.set(conversationId);
     this.selectedFriend.set(friend);
     this.messages.set([]);
+    this.selectedMessageId.set(null);
     this.nextCursor = null;
     this.hasMore.set(false);
     this.loadingOlder.set(false);
@@ -216,24 +255,42 @@ export class ChatComponent implements OnInit {
     this.historyError.set(null);
 
     try {
-      const page = await firstValueFrom(this.conversationsApi.getMessages(conversationId));
+      const page = await firstValueFrom(targetMessageId
+        ? this.conversationsApi.getMessageContext(conversationId, targetMessageId)
+        : this.conversationsApi.getMessages(conversationId));
       if (this.selectedConversationId() !== conversationId || this.conversationLoadVersion !== loadVersion) {
         return;
       }
 
-      this.messages.set(page.messages.map((message) => this.toChatMessage(message, friend)));
-      this.acknowledgeUndeliveredMessages(page.messages);
-      this.nextCursor = page.nextCursor;
-      this.hasMore.set(page.hasMore);
+      if (targetMessageId && !page.messages.some((message) => message.id === targetMessageId)) {
+        throw new Error('The selected message is not present in its history context.');
+      }
+
+      this.replaceMessagePage(page, friend);
+      if (targetMessageId && page.messages.some((message) => message.id === targetMessageId)) {
+        this.selectedMessageId.set(targetMessageId);
+      }
     } catch {
       if (this.selectedConversationId() === conversationId && this.conversationLoadVersion === loadVersion) {
-        this.historyError.set('Messages could not be loaded. Retry to try again.');
+        if (targetMessageId) {
+          this.selectedMessageId.set(null);
+          this.navigationNotice.set('That message is unavailable or could not be loaded. Select the result again to retry.');
+        } else {
+          this.historyError.set('Messages could not be loaded. Retry to try again.');
+        }
       }
     } finally {
       if (this.selectedConversationId() === conversationId && this.conversationLoadVersion === loadVersion) {
         this.initialLoading.set(false);
       }
     }
+  }
+
+  private replaceMessagePage(page: MessagePage, friend: User): void {
+    this.messages.set(page.messages.map((message) => this.toChatMessage(message, friend)));
+    this.acknowledgeUndeliveredMessages(page.messages);
+    this.nextCursor = page.nextCursor;
+    this.hasMore.set(page.hasMore);
   }
 
   private async loadConversations(): Promise<void> {

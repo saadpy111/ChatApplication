@@ -11,6 +11,9 @@ namespace ChatApi.Services.Conversations;
 public class ConversationService : IConversationService
 {
     private const int MaximumPageSize = 100;
+    private const int MaximumSearchPageSize = 50;
+    private const int MaximumSearchTermLength = 200;
+    private const int MessageContextPageSize = 30;
     private readonly ApplicationDbContext _dbContext;
     private readonly UserManager<ApplicationUser> _userManager;
 
@@ -239,6 +242,163 @@ public class ConversationService : IConversationService
         };
     }
 
+    public async Task<MessagePageDto?> GetMessageContextAsync(
+        long conversationId,
+        long messageId,
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        var target = await _dbContext.Messages
+            .AsNoTracking()
+            .Where(message => message.Id == messageId && message.ConversationId == conversationId &&
+                (message.Conversation.User1Id == userId || message.Conversation.User2Id == userId))
+            .Select(message => new { message.CreatedAt, message.Id })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (target is null)
+        {
+            return null;
+        }
+
+        var beforeTarget = await _dbContext.Messages
+            .AsNoTracking()
+            .Where(message => message.ConversationId == conversationId &&
+                (message.Conversation.User1Id == userId || message.Conversation.User2Id == userId) &&
+                (message.CreatedAt < target.CreatedAt ||
+                    (message.CreatedAt == target.CreatedAt && message.Id < target.Id)))
+            .OrderByDescending(message => message.CreatedAt)
+            .ThenByDescending(message => message.Id)
+            .Take(MessageContextPageSize / 2 + 1)
+            .Select(message => new MessageDto
+            {
+                Id = message.Id,
+                ConversationId = message.ConversationId,
+                SenderId = message.SenderId,
+                Content = message.Content,
+                CreatedAt = DateTime.SpecifyKind(message.CreatedAt, DateTimeKind.Utc),
+                DeliveredAt = message.DeliveredAt == null
+                    ? null
+                    : DateTime.SpecifyKind(message.DeliveredAt.Value, DateTimeKind.Utc),
+                ReadAt = message.ReadAt == null
+                    ? null
+                    : DateTime.SpecifyKind(message.ReadAt.Value, DateTimeKind.Utc)
+            })
+            .ToListAsync(cancellationToken);
+
+        var hasMore = beforeTarget.Count > MessageContextPageSize / 2;
+        if (hasMore)
+        {
+            beforeTarget.RemoveAt(beforeTarget.Count - 1);
+        }
+
+        var fromTarget = await _dbContext.Messages
+            .AsNoTracking()
+            .Where(message => message.ConversationId == conversationId &&
+                (message.Conversation.User1Id == userId || message.Conversation.User2Id == userId) &&
+                (message.CreatedAt > target.CreatedAt ||
+                    (message.CreatedAt == target.CreatedAt && message.Id >= target.Id)))
+            .OrderBy(message => message.CreatedAt)
+            .ThenBy(message => message.Id)
+            .Take(MessageContextPageSize - MessageContextPageSize / 2)
+            .Select(message => new MessageDto
+            {
+                Id = message.Id,
+                ConversationId = message.ConversationId,
+                SenderId = message.SenderId,
+                Content = message.Content,
+                CreatedAt = DateTime.SpecifyKind(message.CreatedAt, DateTimeKind.Utc),
+                DeliveredAt = message.DeliveredAt == null
+                    ? null
+                    : DateTime.SpecifyKind(message.DeliveredAt.Value, DateTimeKind.Utc),
+                ReadAt = message.ReadAt == null
+                    ? null
+                    : DateTime.SpecifyKind(message.ReadAt.Value, DateTimeKind.Utc)
+            })
+            .ToListAsync(cancellationToken);
+        var messages = beforeTarget.AsEnumerable().Reverse().Concat(fromTarget).ToList();
+
+        return new MessagePageDto
+        {
+            Messages = messages,
+            HasMore = hasMore,
+            NextCursor = hasMore && messages.Count > 0 ? EncodeCursor(messages[0]) : null
+        };
+    }
+
+    public async Task<MessageSearchPageDto> SearchMessagesAsync(
+        string userId,
+        string? query,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
+        var searchTerm = query?.Trim();
+        if (string.IsNullOrWhiteSpace(searchTerm))
+        {
+            throw new ArgumentException("A non-empty search term is required.", nameof(query));
+        }
+
+        if (searchTerm.Length > MaximumSearchTermLength)
+        {
+            throw new ArgumentException(
+                $"Search terms cannot exceed {MaximumSearchTermLength} characters.", nameof(query));
+        }
+
+        if (page < 1 || pageSize is < 1 or > MaximumSearchPageSize ||
+            ((long)page - 1) * pageSize > int.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(page),
+                $"Page must be positive and page size must be between 1 and {MaximumSearchPageSize}.");
+        }
+
+        var pattern = $"%{EscapeLikePattern(searchTerm)}%";
+        var rows = await _dbContext.Messages
+            .AsNoTracking()
+            .Where(message =>
+                (message.Conversation.User1Id == userId || message.Conversation.User2Id == userId) &&
+                EF.Functions.Like(message.Content, pattern, "~"))
+            .OrderByDescending(message => message.CreatedAt)
+            .ThenByDescending(message => message.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize + 1)
+            .Select(message => new
+            {
+                MessageId = message.Id,
+                message.ConversationId,
+                message.Content,
+                message.SenderId,
+                SenderDisplayName = message.Sender.UserName,
+                OtherUserId = message.Conversation.User1Id == userId
+                    ? message.Conversation.User2Id
+                    : message.Conversation.User1Id,
+                OtherUsername = message.Conversation.User1Id == userId
+                    ? message.Conversation.User2.UserName
+                    : message.Conversation.User1.UserName,
+                message.CreatedAt
+            })
+            .ToListAsync(cancellationToken);
+
+        var hasMore = rows.Count > pageSize;
+        var results = rows.Take(pageSize).Select(message => new MessageSearchResultDto
+        {
+            MessageId = message.MessageId,
+            ConversationId = message.ConversationId,
+            Content = message.Content,
+            SenderId = message.SenderId,
+            SenderDisplayName = message.SenderDisplayName ?? string.Empty,
+            OtherUserId = message.OtherUserId,
+            OtherUsername = message.OtherUsername ?? string.Empty,
+            CreatedAt = DateTime.SpecifyKind(message.CreatedAt, DateTimeKind.Utc)
+        }).ToList();
+
+        return new MessageSearchPageDto
+        {
+            Results = results,
+            Page = page,
+            PageSize = pageSize,
+            HasMore = hasMore
+        };
+    }
+
     public async Task<(MessageDto Message, string RecipientId)?> SendMessageAsync(
         long conversationId,
         string senderId,
@@ -402,6 +562,12 @@ public class ConversationService : IConversationService
             .Replace('+', '-')
             .Replace('/', '_');
     }
+
+    private static string EscapeLikePattern(string value) => value
+        .Replace("~", "~~", StringComparison.Ordinal)
+        .Replace("%", "~%", StringComparison.Ordinal)
+        .Replace("_", "~_", StringComparison.Ordinal)
+        .Replace("[", "~[", StringComparison.Ordinal);
 
     private static bool TryDecodeCursor(string value, out Cursor? cursor)
     {

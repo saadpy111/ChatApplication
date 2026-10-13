@@ -51,6 +51,11 @@
         <p>{{ historyError() }}</p>
         <button class="retry-button" type="button" (click)="retryHistory.emit()">Retry</button>
       </div>
+    } @else if (navigationNotice() && messages().length === 0) {
+      <div class="empty-state" role="alert">
+        <h2>Could not open that message.</h2>
+        <p>{{ navigationNotice() }}</p>
+      </div>
     } @else if (messages().length === 0) {
       <div class="empty-state">
         <h2>Say hello.</h2>
@@ -66,8 +71,11 @@
             <button class="retry-button" type="button" (click)="loadOlder.emit()">Retry</button>
           </p>
         }
+        @if (navigationNotice()) {
+          <p class="history-status" role="status">{{ navigationNotice() }}</p>
+        }
         @for (message of messages(); track message.id) {
-          <article class="message" [class.own-message]="message.senderId === currentUserId()" [attr.data-message-id]="message.id" [attr.data-incoming]="message.senderId !== currentUserId()">
+          <article class="message" [class.own-message]="message.senderId === currentUserId()" [class.search-highlight]="message.id === activeSearchHighlightId()" [attr.id]="'message-' + message.id" [attr.data-message-id]="message.id" [attr.data-incoming]="message.senderId !== currentUserId()">
             <div class="message-avatar" aria-hidden="true">{{ message.senderId === currentUserId() ? (currentUsername().charAt(0).toUpperCase() || '?') : (friend()?.username?.charAt(0)?.toUpperCase() || '?') }}</div>
             <div class="message-body">
               <div class="message-meta">
