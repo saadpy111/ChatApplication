@@ -9,4 +9,7 @@ public class ConversationListItemDto
     public DateTime? LastMessageAt { get; init; }
     public DateTime CreatedAt { get; init; }
     public int UnreadCount { get; init; }
+    public bool OtherUserIsOnline { get; init; }
+    public DateTime? OtherUserLastSeenAt { get; init; }
+    public DateTime? OtherUserPresenceChangedAt { get; init; }
 }

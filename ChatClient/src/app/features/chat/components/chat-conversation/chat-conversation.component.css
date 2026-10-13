@@ -3,6 +3,9 @@
 .conversation-header { display: flex; min-width: 0; min-height: 72px; flex: 0 0 auto; align-items: center; gap: 12px; padding: 12px 28px; border-bottom: 1px solid var(--border); background: var(--sidebar-bg); }
 .room-heading { min-width: 0; flex: 1; }
 .room-heading h1 { overflow: hidden; margin: 0; color: var(--text); font-size: 17px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.user-presence { display: flex; min-height: 14px; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; line-height: 1.2; }
+.user-presence.online { color: var(--online); }
+.user-presence .presence-indicator { width: 7px; height: 7px; border: 0; }
 .header-avatar { display: grid; width: 40px; flex: 0 0 auto; aspect-ratio: 1; place-items: center; border-radius: 50%; color: #eef2ff; background: #39466a; font-size: 15px; font-weight: 650; }
 .back-button { display: none; }
 .connection-area, .connection-state { display: flex; align-items: center; }

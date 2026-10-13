@@ -6,6 +6,15 @@ export interface ConversationSummary {
   lastMessageAt: string | null;
   createdAt: string;
   unreadCount: number;
+  otherUserIsOnline?: boolean;
+  otherUserLastSeenAt?: string | null;
+  otherUserPresenceChangedAt?: string | null;
+}
+
+export interface UserPresence {
+  isOnline: boolean;
+  lastSeenAt: string | null;
+  changedAt: string | null;
 }
 
 export interface UnreadCountUpdate {

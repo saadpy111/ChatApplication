@@ -1,6 +1,7 @@
 using ChatApi.DTOs.Conversations;
 using ChatApi.Models;
 using ChatApi.Services.Conversations;
+using ChatApi.Services.Presence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
@@ -9,10 +10,67 @@ namespace ChatApi.Hubs;
 public class ChatHub : Hub
 {
     private readonly IConversationService _conversationService;
+    private readonly IPresenceService _presenceService;
 
-    public ChatHub(IConversationService conversationService)
+    public ChatHub(IConversationService conversationService, IPresenceService presenceService)
     {
         _conversationService = conversationService;
+        _presenceService = presenceService;
+    }
+
+    public override async Task OnConnectedAsync()
+    {
+        var userId = Context.UserIdentifier;
+        if (!string.IsNullOrEmpty(userId) && await _presenceService.AddConnectionAsync(
+                userId, Context.ConnectionId, Context.ConnectionAborted))
+        {
+            var observers = await _conversationService.GetPresenceObserverIdsAsync(
+                userId, Context.ConnectionAborted);
+            if (observers.Count > 0)
+            {
+                await Clients.Users(observers).SendAsync("UserOnline", new
+                {
+                    UserId = userId,
+                    IsOnline = true,
+                    LastSeenAt = (DateTime?)null,
+                    ChangedAt = DateTime.UtcNow
+                }, Context.ConnectionAborted);
+            }
+        }
+
+        await base.OnConnectedAsync();
+    }
+
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        try
+        {
+            var userId = Context.UserIdentifier;
+            if (!string.IsNullOrEmpty(userId))
+            {
+                var lastSeenAt = await _presenceService.RemoveConnectionAsync(
+                    userId, Context.ConnectionId, CancellationToken.None);
+                if (lastSeenAt is not null)
+                {
+                    var observers = await _conversationService.GetPresenceObserverIdsAsync(
+                        userId, CancellationToken.None);
+                    if (observers.Count > 0)
+                    {
+                        await Clients.Users(observers).SendAsync("UserOffline", new
+                        {
+                            UserId = userId,
+                            IsOnline = false,
+                            LastSeenAt = lastSeenAt,
+                            ChangedAt = lastSeenAt
+                        });
+                    }
+                }
+            }
+        }
+        finally
+        {
+            await base.OnDisconnectedAsync(exception);
+        }
     }
 
     public async Task<MessageDto> SendMessage(long conversationId, string content)

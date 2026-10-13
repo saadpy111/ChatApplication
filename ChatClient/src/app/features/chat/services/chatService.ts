@@ -2,7 +2,7 @@ import { inject, Injectable, signal } from '@angular/core';
 import { HubConnection, HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr';
 import { Subject } from 'rxjs';
 import { AuthService } from '../../../core/services/auth.service';
-import { PersistedMessage, UnreadCountUpdate } from '../models/conversation.model';
+import { ConversationSummary, PersistedMessage, UnreadCountUpdate, UserPresence } from '../models/conversation.model';
 import { ChatConnectionStatus } from '../models/chat-message.model';
 
 @Injectable({ providedIn: 'root' })
@@ -32,6 +32,18 @@ export class ChatService {
   readonly connectionLost$ = this.connectionLostSubject.asObservable();
   readonly status = signal<ChatConnectionStatus>('disconnected');
   readonly error = signal<string | null>(null);
+  readonly presenceByUserId = signal<Record<string, UserPresence>>({});
+
+  setConversationPresence(conversations: ConversationSummary[]): void {
+    for (const conversation of conversations) {
+      this.applyPresenceUpdate({
+        userId: conversation.otherUserId,
+        isOnline: conversation.otherUserIsOnline ?? false,
+        lastSeenAt: conversation.otherUserLastSeenAt ?? null,
+        changedAt: conversation.otherUserPresenceChangedAt ?? conversation.otherUserLastSeenAt ?? null,
+      });
+    }
+  }
 
   async startConnection(): Promise<void> {
     const connection = this.getOrCreateConnection();
@@ -57,6 +69,7 @@ export class ChatService {
       })
       .catch((error: unknown) => {
         this.status.set('disconnected');
+        this.presenceByUserId.set({});
         this.error.set('Unable to connect to the chat server. Try again.');
         throw error;
       })
@@ -213,8 +226,19 @@ export class ChatService {
         this.userStoppedTypingSubject.next(payload);
       }
     });
+    connection.on('UserOnline', (payload: unknown) => {
+      if (isPresenceUpdate(payload)) {
+        this.applyPresenceUpdate(payload);
+      }
+    });
+    connection.on('UserOffline', (payload: unknown) => {
+      if (isPresenceUpdate(payload)) {
+        this.applyPresenceUpdate(payload);
+      }
+    });
     connection.onreconnecting(() => {
       this.status.set('reconnecting');
+      this.presenceByUserId.set({});
       this.connectionLostSubject.next();
     });
     connection.onreconnected(() => {
@@ -226,11 +250,36 @@ export class ChatService {
     });
     connection.onclose(() => {
       this.status.set('disconnected');
+      this.presenceByUserId.set({});
       this.connectionLostSubject.next();
     });
 
     this.hubConnection = connection;
     return connection;
+  }
+
+  private applyPresenceUpdate(update: {
+    userId: string;
+    isOnline: boolean;
+    lastSeenAt: string | null;
+    changedAt: string | null;
+  }): void {
+    this.presenceByUserId.update((current) => {
+      const previous = current[update.userId];
+      if (previous?.changedAt && update.changedAt &&
+          Date.parse(previous.changedAt) > Date.parse(update.changedAt)) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [update.userId]: {
+          isOnline: update.isOnline,
+          lastSeenAt: update.lastSeenAt,
+          changedAt: update.changedAt,
+        },
+      };
+    });
   }
 
   private invokeTypingMethod(method: 'TypingStarted' | 'TypingStopped', conversationId: number): void {
@@ -252,6 +301,13 @@ export interface UserTypingEvent {
 export interface UserStoppedTypingEvent {
   conversationId: number;
   userId: string;
+}
+
+interface PresenceUpdate {
+  userId: string;
+  isOnline: boolean;
+  lastSeenAt: string | null;
+  changedAt: string;
 }
 
 function isPersistedMessage(payload: unknown): payload is PersistedMessage {
@@ -304,4 +360,17 @@ function isConversationId(value: unknown): value is number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function isPresenceUpdate(payload: unknown): payload is PresenceUpdate {
+  if (!isRecord(payload)) {
+    return false;
+  }
+
+  return typeof payload['userId'] === 'string' && payload['userId'].length > 0
+    && typeof payload['isOnline'] === 'boolean'
+    && (payload['lastSeenAt'] === null || typeof payload['lastSeenAt'] === 'string')
+    && typeof payload['changedAt'] === 'string'
+    && Number.isFinite(Date.parse(payload['changedAt']))
+    && (payload['lastSeenAt'] === null || Number.isFinite(Date.parse(payload['lastSeenAt'])));
 }

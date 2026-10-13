@@ -3,6 +3,7 @@ import { AfterViewChecked, afterNextRender, Component, DestroyRef, ElementRef, i
 import { FormsModule } from '@angular/forms';
 import { ChatConnectionStatus, ChatMessage, MessageSendRequest, MessageSendResult } from '../../models/chat-message.model';
 import { User } from '../../../users/models/user';
+import { UserPresence } from '../../models/conversation.model';
 
 @Component({
   selector: 'app-chat-conversation',
@@ -25,6 +26,7 @@ export class ChatConversationComponent implements AfterViewChecked, OnChanges {
   @ViewChild('sendButton') private sendButton?: ElementRef<HTMLButtonElement>;
 
   readonly friend = input<User | null>(null);
+  readonly presence = input<UserPresence | null>(null);
   readonly conversationId = input<number | null>(null);
   readonly conversationActive = input(true);
   readonly messages = input<ChatMessage[]>([]);

@@ -3,6 +3,7 @@ using System.Text;
 using ChatApi.Data;
 using ChatApi.DTOs.Conversations;
 using ChatApi.Models;
+using ChatApi.Services.Presence;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,11 +17,16 @@ public class ConversationService : IConversationService
     private const int MessageContextPageSize = 30;
     private readonly ApplicationDbContext _dbContext;
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly IPresenceService _presenceService;
 
-    public ConversationService(ApplicationDbContext dbContext, UserManager<ApplicationUser> userManager)
+    public ConversationService(
+        ApplicationDbContext dbContext,
+        UserManager<ApplicationUser> userManager,
+        IPresenceService presenceService)
     {
         _dbContext = dbContext;
         _userManager = userManager;
+        _presenceService = presenceService;
     }
 
     public async Task<ConversationDto?> OpenAsync(
@@ -95,6 +101,9 @@ public class ConversationService : IConversationService
                 OtherUsername = conversation.User1Id == userId
                     ? conversation.User2.UserName
                     : conversation.User1.UserName,
+                OtherUserLastSeenAt = conversation.User1Id == userId
+                    ? conversation.User2.LastSeenAt
+                    : conversation.User1.LastSeenAt,
                 UnreadCount = conversation.Messages.Count(message =>
                     message.SenderId != userId && message.ReadAt == null),
                 LastMessage = conversation.Messages
@@ -107,19 +116,42 @@ public class ConversationService : IConversationService
             .ThenByDescending(item => item.Id)
             .ToListAsync(cancellationToken);
 
-        return items.Select(item => new ConversationListItemDto
+        return items.Select(item =>
         {
-            ConversationId = item.Id,
-            OtherUserId = item.OtherUserId,
-            OtherUsername = item.OtherUsername ?? string.Empty,
-            LastMessagePreview = item.LastMessage?.Content,
-            LastMessageAt = item.LastMessage is null
-                ? null
-                : DateTime.SpecifyKind(item.LastMessage.CreatedAt, DateTimeKind.Utc),
-            CreatedAt = DateTime.SpecifyKind(item.CreatedAt, DateTimeKind.Utc),
-            UnreadCount = item.UnreadCount
+            var lastSeenAt = SpecifyUtc(item.OtherUserLastSeenAt);
+            var presence = _presenceService.GetSnapshot(item.OtherUserId, lastSeenAt);
+            return new ConversationListItemDto
+            {
+                ConversationId = item.Id,
+                OtherUserId = item.OtherUserId,
+                OtherUsername = item.OtherUsername ?? string.Empty,
+                LastMessagePreview = item.LastMessage?.Content,
+                LastMessageAt = item.LastMessage is null ? null : SpecifyUtc(item.LastMessage.CreatedAt),
+                CreatedAt = SpecifyUtc(item.CreatedAt),
+                UnreadCount = item.UnreadCount,
+                OtherUserIsOnline = presence.IsOnline,
+                OtherUserLastSeenAt = presence.LastSeenAt,
+                OtherUserPresenceChangedAt = presence.ChangedAt
+            };
         }).ToList();
     }
+
+    public async Task<IReadOnlyList<string>> GetPresenceObserverIdsAsync(
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        return await _dbContext.Conversations
+            .AsNoTracking()
+            .Where(conversation => conversation.User1Id == userId || conversation.User2Id == userId)
+            .Select(conversation => conversation.User1Id == userId ? conversation.User2Id : conversation.User1Id)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+    }
+
+    private static DateTime? SpecifyUtc(DateTime? value) =>
+        value is null ? null : DateTime.SpecifyKind(value.Value, DateTimeKind.Utc);
+
+    private static DateTime SpecifyUtc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
 
     public Task<int> GetUnreadCountAsync(
         long conversationId,

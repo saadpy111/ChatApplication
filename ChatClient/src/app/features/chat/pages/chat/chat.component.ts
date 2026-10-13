@@ -8,6 +8,7 @@ import {
   MessageSearchResult,
   PersistedMessage,
   UnreadCountUpdate,
+  UserPresence,
 } from '../../models/conversation.model';
 import { ChatConversationComponent } from '../../components/chat-conversation/chat-conversation.component';
 import { ChatSidebarComponent } from '../../components/chat-sidebar/chat-sidebar.component';
@@ -181,6 +182,11 @@ export class ChatComponent implements OnInit {
     void this.loadConversations();
   }
 
+  presenceForSelectedFriend(): UserPresence | null {
+    const userId = this.selectedFriend()?.userId;
+    return userId ? this.chatService.presenceByUserId()[userId] ?? null : null;
+  }
+
   async loadOlderMessages(): Promise<void> {
     const conversationId = this.selectedConversationId();
     const cursor = this.nextCursor;
@@ -301,6 +307,7 @@ export class ChatComponent implements OnInit {
     try {
       const conversations = await firstValueFrom(this.conversationsApi.getConversations());
       if (this.conversationsLoadVersion === loadVersion) {
+        this.chatService.setConversationPresence(conversations);
         this.conversations.set(conversations.map((conversation) => {
           const update = this.pendingUnreadCountUpdates.get(conversation.conversationId);
           return update && update.version > unreadUpdateVersion

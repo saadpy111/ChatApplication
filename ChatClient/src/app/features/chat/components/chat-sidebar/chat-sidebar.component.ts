@@ -17,7 +17,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, distinctUntilChanged, finalize, of, Subject, switchMap, timer } from 'rxjs';
 import { User } from '../../../users/models/user';
 import { UsersApiService } from '../../../users/data-access/users-api.service';
-import { ConversationSummary, MessageSearchResult } from '../../models/conversation.model';
+import { ConversationSummary, MessageSearchResult, UserPresence } from '../../models/conversation.model';
 import { ConversationsApiService } from '../../services/conversations-api.service';
 
 type SidebarMode = 'conversations' | 'messages' | 'friends';
@@ -45,6 +45,7 @@ export class ChatSidebarComponent implements OnInit {
   readonly selectedFriend = input<User | null>(null);
   readonly selectedConversationId = input<number | null>(null);
   readonly conversations = input<ConversationSummary[]>([]);
+  readonly presenceByUserId = input<Record<string, UserPresence>>({});
   readonly conversationsLoading = input(false);
   readonly conversationsError = input<string | null>(null);
   readonly openingConversation = input(false);
