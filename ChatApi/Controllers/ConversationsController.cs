@@ -59,6 +59,32 @@ public class ConversationsController : ControllerBase
         return Ok(await _conversationService.GetConversationsAsync(userId, cancellationToken));
     }
 
+    [HttpGet("search/messages")]
+    [ProducesResponseType(typeof(MessageSearchPageDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<MessageSearchPageDto>> SearchMessages(
+        [FromQuery] string? q,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var userId = _userManager.GetUserId(User);
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            return Ok(await _conversationService.SearchMessagesAsync(
+                userId, q, page, pageSize, cancellationToken));
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { error = exception.Message });
+        }
+    }
+
     [HttpGet("{conversationId:long}/messages")]
     [ProducesResponseType(typeof(MessagePageDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -89,5 +115,24 @@ public class ConversationsController : ControllerBase
         {
             return BadRequest(new { error = "The message cursor is invalid." });
         }
+    }
+
+    [HttpGet("{conversationId:long}/messages/{messageId:long}/context")]
+    [ProducesResponseType(typeof(MessagePageDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<MessagePageDto>> GetMessageContext(
+        long conversationId,
+        long messageId,
+        CancellationToken cancellationToken)
+    {
+        var userId = _userManager.GetUserId(User);
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        var page = await _conversationService.GetMessageContextAsync(
+            conversationId, messageId, userId, cancellationToken);
+        return page is null ? NotFound() : Ok(page);
     }
 }

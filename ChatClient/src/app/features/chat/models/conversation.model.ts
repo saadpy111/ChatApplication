@@ -35,3 +35,21 @@ export interface MessagePage {
   nextCursor: string | null;
   hasMore: boolean;
 }
+
+export interface MessageSearchResult {
+  messageId: number;
+  conversationId: number;
+  content: string;
+  senderId: string;
+  senderDisplayName: string;
+  otherUserId: string;
+  otherUsername: string;
+  createdAt: string;
+}
+
+export interface MessageSearchPage {
+  results: MessageSearchResult[];
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+}

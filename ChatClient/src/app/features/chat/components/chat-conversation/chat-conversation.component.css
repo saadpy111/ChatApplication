@@ -23,6 +23,9 @@
 .empty-state h2 { margin: 0 0 10px; color: var(--text); font-size: 22px; font-weight: 600; }
 .empty-state > p { max-width: 320px; margin: 0 auto; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .message { display: flex; min-width: 0; align-items: flex-end; gap: 9px; justify-content: flex-start; margin: 0 0 14px; }
+.message.search-highlight .message-body { animation: search-message-highlight 2.4s ease-out; }
+@keyframes search-message-highlight { 0%, 55% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .message.search-highlight .message-body { animation: none; outline: 2px solid var(--accent); } }
 .message.own-message { justify-content: flex-end; }
 .message-avatar { display: grid; width: 30px; flex: 0 0 auto; aspect-ratio: 1; place-items: center; border-radius: 50%; color: #dbeafe; background: #334155; font-size: 12px; font-weight: 650; }
 .own-message .message-avatar { color: #eef2ff; background: #4f46e5; }

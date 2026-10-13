@@ -17,6 +17,17 @@ public interface IConversationService
         int pageSize,
         string? before,
         CancellationToken cancellationToken);
+    Task<MessagePageDto?> GetMessageContextAsync(
+        long conversationId,
+        long messageId,
+        string userId,
+        CancellationToken cancellationToken);
+    Task<MessageSearchPageDto> SearchMessagesAsync(
+        string userId,
+        string? query,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken);
     Task<(MessageDto Message, string RecipientId)?> SendMessageAsync(
         long conversationId,
         string senderId,
