@@ -124,17 +124,23 @@ if (app.Environment.IsDevelopment())
     await dbContext.Database.MigrateAsync();
 }
 
-if (app.Environment.IsDevelopment())
-{
+ if(app.Environment.IsDevelopment())
+ {
     app.UseSwagger();
     app.UseSwaggerUI();
-}
+ }
 
 app.UseHttpsRedirection();
 
 app.UseAuthentication();
 app.UseAuthorization();
 
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.MapControllers();
 app.MapHub<ChatHub>("/chatHub");
+
+app.MapFallbackToFile("index.html");
+
 app.Run();
