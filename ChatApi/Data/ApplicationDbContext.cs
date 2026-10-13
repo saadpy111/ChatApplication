@@ -13,6 +13,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
 
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<Message> Messages => Set<Message>();
+    public DbSet<MessageReaction> MessageReactions => Set<MessageReaction>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -48,6 +49,22 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasOne(message => message.Sender)
                 .WithMany()
                 .HasForeignKey(message => message.SenderId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<MessageReaction>(entity =>
+        {
+            entity.HasKey(r => r.Id);
+            entity.Property(r => r.Emoji).HasMaxLength(16).IsRequired();
+            entity.HasIndex(r => new { r.MessageId, r.UserId }).IsUnique();
+            entity.HasIndex(r => r.MessageId);
+            entity.HasOne(r => r.Message)
+                .WithMany(m => m.Reactions)
+                .HasForeignKey(r => r.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(r => r.User)
+                .WithMany()
+                .HasForeignKey(r => r.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

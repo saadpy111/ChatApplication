@@ -5,6 +5,7 @@ using ChatApi.Models;
 using ChatApi.Services.Auth;
 using ChatApi.Services.Conversations;
 using ChatApi.Services.Presence;
+using ChatApi.Services.Reactions;
 using ChatApi.Services.Users;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -110,6 +111,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IUserSearchService, UserSearchService>();
 builder.Services.AddScoped<IConversationService, ConversationService>();
+builder.Services.AddScoped<IReactionService, ReactionService>();
 builder.Services.AddSingleton<IPresenceService, PresenceService>();
 builder.Services.AddSignalR();
 

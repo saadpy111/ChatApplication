@@ -5,6 +5,7 @@ import { ChatMessage, MessageActionState, MessageSendRequest, MessageSendResult 
 import {
   ConversationSummary,
   MessagePage,
+  MessageReactionUpdate,
   MessageSearchResult,
   PersistedMessage,
   UnreadCountUpdate,
@@ -35,6 +36,7 @@ export class ChatComponent implements OnInit {
   readonly sending = signal(false);
   readonly sendResult = signal<MessageSendResult | null>(null);
   readonly messageActionStates = signal<Record<number, MessageActionState>>({});
+  readonly reactionActionStates = signal<Record<number, MessageActionState>>({});
   readonly typingUsername = signal<string | null>(null);
   readonly conversationsLoading = signal(true);
   readonly conversationsError = signal<string | null>(null);
@@ -86,6 +88,9 @@ export class ChatComponent implements OnInit {
     this.chatService.connectionLost$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => this.clearTypingIndicator());
+    this.chatService.messageReactionUpdates$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((update) => this.applyReactionUpdate(update));
     this.destroyRef.onDestroy(() => {
       this.clearTypingIndicator();
       if (this.activeTypingConversationId !== null) {
@@ -289,6 +294,35 @@ export class ChatComponent implements OnInit {
     }
   }
 
+  async handleReaction(request: { conversationId: number; messageId: number; emoji: string }): Promise<void> {
+    if (this.selectedConversationId() !== request.conversationId
+      || this.reactionActionStates()[request.messageId]?.pending) {
+      return;
+    }
+    this.setReactionActionState(request.messageId, { pending: true, error: null });
+    try {
+      await this.chatService.reactToMessage(request.conversationId, request.messageId, request.emoji);
+    } catch {
+      try {
+        const page = await firstValueFrom(this.conversationsApi.getMessageContext(
+          request.conversationId, request.messageId,
+        ));
+        const friend = this.selectedFriend();
+        if (friend && this.selectedConversationId() === request.conversationId) {
+          this.messages.update((current) => this.mergeMessages(current, page.messages, friend));
+        }
+      } catch {
+        // Keep the last known state when history cannot be refreshed.
+      }
+      this.setReactionActionState(request.messageId, {
+        pending: false,
+        error: 'This reaction could not be saved. Try again.',
+      });
+      return;
+    }
+    this.setReactionActionState(request.messageId, null);
+  }
+
   private async activateConversation(
     conversationId: number,
     friend: User,
@@ -301,6 +335,7 @@ export class ChatComponent implements OnInit {
     this.selectedFriend.set(friend);
     this.messages.set([]);
     this.messageActionStates.set({});
+    this.reactionActionStates.set({});
     this.selectedMessageId.set(null);
     this.nextCursor = null;
     this.hasMore.set(false);
@@ -414,13 +449,36 @@ export class ChatComponent implements OnInit {
   private applyMessageMutation(message: PersistedMessage): void {
     if (this.selectedConversationId() === message.conversationId
       && this.messages().some((item) => item.id === message.id)) {
-      this.messages.update((current) => this.mergeMessages(current, [message]));
+      this.messages.update((current) => this.mergeMessages(current, [message], undefined, true));
     }
     void this.loadConversations();
   }
 
+  private applyReactionUpdate(update: MessageReactionUpdate): void {
+    if (this.selectedConversationId() !== update.conversationId) {
+      return;
+    }
+    this.messages.update((current) =>
+      current.map((item) =>
+        item.id === update.messageId ? { ...item, reactions: update.reactions } : item,
+      ),
+    );
+  }
+
   private setMessageActionState(messageId: number, state: MessageActionState | null): void {
     this.messageActionStates.update((current) => {
+      const next = { ...current };
+      if (state) {
+        next[messageId] = state;
+      } else {
+        delete next[messageId];
+      }
+      return next;
+    });
+  }
+
+  private setReactionActionState(messageId: number, state: MessageActionState | null): void {
+    this.reactionActionStates.update((current) => {
       const next = { ...current };
       if (state) {
         next[messageId] = state;
@@ -571,6 +629,7 @@ export class ChatComponent implements OnInit {
     current: ChatMessage[],
     incoming: PersistedMessage[],
     friend = this.selectedFriend(),
+    preserveExistingReactions = false,
   ): ChatMessage[] {
     if (!friend) {
       return current;
@@ -595,6 +654,7 @@ export class ChatComponent implements OnInit {
         isDeleted,
         deliveredAt: converted.deliveredAt ?? pendingStatus?.deliveredAt ?? existing?.deliveredAt ?? null,
         readAt: converted.readAt ?? pendingStatus?.readAt ?? existing?.readAt ?? null,
+        reactions: preserveExistingReactions && existing ? existing.reactions : converted.reactions,
       });
     }
 
@@ -614,6 +674,7 @@ export class ChatComponent implements OnInit {
       isDeleted: message.isDeleted ?? Boolean(message.deletedAt),
       deliveredAt: message.deliveredAt,
       readAt: message.readAt,
+      reactions: message.reactions ?? [],
     };
   }
 }

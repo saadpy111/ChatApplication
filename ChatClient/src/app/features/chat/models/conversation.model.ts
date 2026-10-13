@@ -29,6 +29,18 @@ export interface OpenConversation {
   createdAt: string;
 }
 
+export interface MessageReaction {
+  emoji: string;
+  count: number;
+  reactedByCurrentUser: boolean;
+}
+
+export interface MessageReactionUpdate {
+  conversationId: number;
+  messageId: number;
+  reactions: MessageReaction[];
+}
+
 export interface PersistedMessage {
   id: number;
   conversationId: number;
@@ -40,6 +52,7 @@ export interface PersistedMessage {
   isDeleted?: boolean;
   deliveredAt: string | null;
   readAt: string | null;
+  reactions?: MessageReaction[];
 }
 
 export interface MessagePage {
